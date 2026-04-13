@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Doorway Monitoring System - Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; padding: 40px; }
+  h1 { text-align: center; font-size: 28px; margin-bottom: 10px; color: #38bdf8; }
+  h2 { text-align: center; font-size: 16px; color: #94a3b8; margin-bottom: 40px; font-weight: normal; }
+  .section-title { font-size: 18px; font-weight: 700; color: #facc15; margin: 30px 0 15px 0; text-align: center; letter-spacing: 1px; }
+
+  /* Layout */
+  .diagram { max-width: 1100px; margin: 0 auto; }
+  .row { display: flex; justify-content: center; align-items: center; gap: 20px; margin-bottom: 10px; flex-wrap: wrap; }
+  .arrow-row { display: flex; justify-content: center; margin: 8px 0; }
+  .arrow { font-size: 28px; color: #64748b; }
+  .arrow-h { font-size: 24px; color: #64748b; margin: 0 6px; align-self: center; }
+
+  /* Boxes */
+  .box {
+    border-radius: 12px; padding: 16px 22px; text-align: center;
+    min-width: 160px; position: relative;
+    border: 1.5px solid rgba(255,255,255,0.1);
+    backdrop-filter: blur(4px);
+  }
+  .box .label { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .box .sub { font-size: 11px; color: #94a3b8; line-height: 1.4; }
+
+  .cam { background: linear-gradient(135deg, #1e3a5f, #0f2640); border-color: #3b82f6; }
+  .cam .label { color: #60a5fa; }
+
+  .process { background: linear-gradient(135deg, #1a3332, #0f2524); border-color: #14b8a6; }
+  .process .label { color: #2dd4bf; }
+
+  .model { background: linear-gradient(135deg, #3b1f4a, #2a1538); border-color: #a855f7; }
+  .model .label { color: #c084fc; }
+
+  .track { background: linear-gradient(135deg, #4a2d1b, #3a1f10); border-color: #f97316; }
+  .track .label { color: #fb923c; }
+
+  .output { background: linear-gradient(135deg, #1a3a1a, #0f280f); border-color: #22c55e; }
+  .output .label { color: #4ade80; }
+
+  .infra { background: linear-gradient(135deg, #3a2020, #2a1010); border-color: #ef4444; }
+  .infra .label { color: #f87171; }
+
+  .cloud { background: linear-gradient(135deg, #1e2a4a, #101830); border-color: #6366f1; }
+  .cloud .label { color: #818cf8; }
+
+  .db { background: linear-gradient(135deg, #3a3a10, #2a2a08); border-color: #eab308; }
+  .db .label { color: #facc15; }
+
+  /* Stretch section */
+  .stretch-border {
+    border: 2px dashed #475569; border-radius: 16px; padding: 24px 20px;
+    margin-top: 30px; position: relative;
+  }
+  .stretch-label {
+    position: absolute; top: -13px; left: 50%; transform: translateX(-50%);
+    background: #0f172a; padding: 0 16px; color: #f59e0b; font-weight: 700;
+    font-size: 14px; letter-spacing: 1px;
+  }
+
+  /* MVP Pipeline highlight */
+  .mvp-border {
+    border: 2px solid #2dd4bf44; border-radius: 16px; padding: 24px 20px;
+    position: relative;
+  }
+  .mvp-label {
+    position: absolute; top: -13px; left: 50%; transform: translateX(-50%);
+    background: #0f172a; padding: 0 16px; color: #2dd4bf; font-weight: 700;
+    font-size: 14px; letter-spacing: 1px;
+  }
+
+  /* Multi-cam row */
+  .multi-cam { display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<h1>Real-time Doorway Monitoring System</h1>
+<h2>Claire Liu & Yu-Jing Wei | CS5330 Final Project</h2>
+
+<div class="diagram">
+
+  <!-- ==================== MVP ==================== -->
+  <div class="mvp-border">
+    <span class="mvp-label">MVP PIPELINE</span>
+
+    <!-- Camera -->
+    <div class="row">
+      <div class="box cam">
+        <div class="label">Camera Input</div>
+        <div class="sub">Webcam / Doorway Video</div>
+      </div>
+    </div>
+    <div class="arrow-row"><span class="arrow">&#x25BC;</span></div>
+
+    <!-- Preprocessing -->
+    <div class="row">
+      <div class="box process">
+        <div class="label">Frame Preprocessing</div>
+        <div class="sub">Resize &bull; Normalize &bull; Color Convert</div>
+      </div>
+    </div>
+    <div class="arrow-row"><span class="arrow">&#x25BC;</span></div>
+
+    <!-- YOLOv8 -->
+    <div class="row">
+      <div class="box model">
+        <div class="label">YOLOv8 Detection</div>
+        <div class="sub">Pretrained on COCO<br>Detect "person" class<br>Bounding Boxes + Confidence</div>
+      </div>
+    </div>
+    <div class="arrow-row"><span class="arrow">&#x25BC;</span></div>
+
+    <!-- BOT-SORT -->
+    <div class="row">
+      <div class="box track">
+        <div class="label">BOT-SORT Tracking</div>
+        <div class="sub">Unique ID Assignment<br>Motion Prediction (Kalman)<br>Re-Identification (ReID)<br>Occlusion Recovery</div>
+      </div>
+    </div>
+    <div class="arrow-row"><span class="arrow">&#x25BC;</span></div>
+
+    <!-- Counting + Output -->
+    <div class="row">
+      <div class="box output">
+        <div class="label">Counting Logic</div>
+        <div class="sub">Track unique IDs per time window<br>Prevent double counting</div>
+      </div>
+      <span class="arrow-h">&#x25B6;</span>
+      <div class="box output">
+        <div class="label">Real-time Display</div>
+        <div class="sub">Annotated video stream<br>Bounding boxes + IDs + Count</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== STRETCH ==================== -->
+  <div class="stretch-border">
+    <span class="stretch-label">STRETCH GOALS</span>
+
+    <!-- Multi-camera -->
+    <div class="section-title">Multi-View Re-Identification</div>
+    <div class="multi-cam">
+      <div class="box cam" style="min-width:130px;">
+        <div class="label">Camera 1</div>
+        <div class="sub">Angle A</div>
+      </div>
+      <div class="box cam" style="min-width:130px;">
+        <div class="label">Camera 2</div>
+        <div class="sub">Angle B</div>
+      </div>
+      <div class="box cam" style="min-width:130px;">
+        <div class="label">Camera 3</div>
+        <div class="sub">Angle C</div>
+      </div>
+    </div>
+    <div class="arrow-row"><span class="arrow">&#x25BC;</span></div>
+
+    <!-- Kafka -->
+    <div class="row">
+      <div class="box infra">
+        <div class="label">Apache Kafka</div>
+        <div class="sub">Persistent Frame Buffer<br>Decouple cameras from inference<br>Hosted on AWS EC2</div>
+      </div>
+    </div>
+    <div class="arrow-row"><span class="arrow">&#x25BC;</span></div>
+
+    <!-- Inference Workers -->
+    <div class="row">
+      <div class="box cloud">
+        <div class="label">Parallel Inference Workers</div>
+        <div class="sub">Java-based &bull; Dockerized<br>Deployed on Amazon ECS<br>YOLO + BOT-SORT per worker</div>
+      </div>
+      <span class="arrow-h">&#x25B6;</span>
+      <div class="box model">
+        <div class="label">ReID Embedding</div>
+        <div class="sub">Cross-camera identity fusion<br>Feature vector matching</div>
+      </div>
+    </div>
+    <div class="arrow-row"><span class="arrow">&#x25BC;</span></div>
+
+    <!-- Qdrant + Behavior -->
+    <div class="row">
+      <div class="box db">
+        <div class="label">Qdrant Vector DB</div>
+        <div class="sub">Nearest-neighbor search<br>Persistent identity records<br>Dockerized on ECS</div>
+      </div>
+      <span class="arrow-h">&#x25B6;</span>
+      <div class="box output">
+        <div class="label">Behavior Analysis</div>
+        <div class="sub">Lingering detection<br>Repeated zone traversal<br>Anomalous trajectory flagging</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer: Tech Stack -->
+  <div style="margin-top: 30px; text-align: center; color: #64748b; font-size: 12px;">
+    <strong style="color:#94a3b8;">Tech Stack:</strong> Python &bull; PyTorch &bull; Ultralytics &bull; OpenCV &bull; Kafka &bull; Java &bull; Docker &bull; AWS EC2/ECS &bull; Qdrant
+  </div>
+
+</div>
+</body>
+</html>
