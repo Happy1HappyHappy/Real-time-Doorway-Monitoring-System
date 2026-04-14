@@ -5,17 +5,28 @@ A real-time multi-camera surveillance system that detects and re-identifies peop
 ## Architecture
 
 ```
-┌─────────────┐    RTSP     ┌───────────┐    RTSP     ┌───────────────┐
-│ Python Edge │ ──────────> │ MediaMTX  │ ──────────> │ YOLO Worker   │
-│ (camera)    │             │ (media    │ <────────── │ (inference +  │
-└─────────────┘             │  server)  │  annotated  │  ReID + track)│
-                            └───────────┘             └──────┬────────┘
-                                                             │ Kafka
-                                                             v
-┌──────────┐  WebSocket   ┌──────────────┐  SQL/Vector  ┌─────────┐
-│ Frontend │ <─────────── │ Java Backend │ ───────────> │Postgres │
-│ (client) │              │ (Spring Boot)│              │ Qdrant  │
-└──────────┘              └──────────────┘              └─────────┘
+                         ┌───────────────────────────────────────────────────────┐
+                         │            Two parallel data channels                 │
+                         │                                                       │
+                         │  Video Path (RTSP)         Event Path (Kafka)         │
+                         └───────────────────────────────────────────────────────┘
+
+┌─────────────┐   RTSP    ┌───────────┐   RTSP    ┌───────────────┐
+│ Python Edge │ ────────> │           │ ────────> │               │
+│ (camera)    │           │ MediaMTX  │           │  YOLO Worker  │
+└─────────────┘           │ (media    │ <──────── │  (YOLOv8 +    │
+                          │  server)  │ annotated │   BoTSORT +   │
+     ┌────────────────┐   │           │           │   OSNet ReID) │
+     │ RTSP / WebRTC  │<──│           │           │               │
+     │ viewer (client) │   └───────────┘           └───────┬───────┘
+     └────────────────┘                                    │
+                                                    Kafka (JSON events)
+                                                           │
+                                                           v
+     ┌──────────┐  WS    ┌──────────────┐  SQL/Vec  ┌───────────┐
+     │ Frontend │ <───── │ Java Backend │ ────────> │ Postgres  │
+     │ (client) │        │ (Spring Boot)│           │ Qdrant    │
+     └──────────┘        └──────────────┘           └───────────┘
 ```
 
 ### Components
