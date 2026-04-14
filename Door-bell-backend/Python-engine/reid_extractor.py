@@ -29,7 +29,7 @@ def _load_model():
     _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Use torchreid's OSNet (small, fast, good accuracy)
-    from torchreid.utils import FeatureExtractor
+    from torchreid.reid.utils import FeatureExtractor
     _model = FeatureExtractor(
         model_name="osnet_x0_25",
         model_path="",  # auto-downloads pretrained weights

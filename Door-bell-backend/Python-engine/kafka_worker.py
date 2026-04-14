@@ -141,9 +141,16 @@ class InferenceWorker:
 
         try:
             while True:
-                ret, frame = cap.read()
+                # Drain buffer — always grab the latest frame to avoid lag
+                ret = cap.grab()
                 if not ret:
                     time.sleep(0.1)
+                    continue
+                # Skip stale buffered frames, only decode the newest one
+                for _ in range(4):
+                    cap.grab()
+                ret, frame = cap.retrieve()
+                if not ret:
                     continue
 
                 # Start FFmpeg output on first frame (to get actual resolution)
@@ -155,12 +162,19 @@ class InferenceWorker:
                 annotated, detections = self._process_frame(frame)
                 frame_count += 1
 
-                # Push annotated frame to MediaMTX
-                try:
-                    self._ffmpeg_out.stdin.write(annotated.tobytes())
-                except BrokenPipeError:
-                    print("ERROR: FFmpeg output pipe broken")
-                    break
+                # Push annotated frame to MediaMTX (best-effort, never kills the worker)
+                if self._ffmpeg_out is not None:
+                    try:
+                        self._ffmpeg_out.stdin.write(annotated.tobytes())
+                    except BrokenPipeError:
+                        print(f"  [{CAMERA_ID}] FFmpeg pipe broken, restarting output stream...")
+                        try:
+                            self._ffmpeg_out.stdin.close()
+                            self._ffmpeg_out.wait(timeout=3)
+                        except Exception:
+                            pass
+                        h, w = frame.shape[:2]
+                        self._start_ffmpeg_output(w, h)
 
                 # Send new detections to Kafka
                 if detections:
