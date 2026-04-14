@@ -1,22 +1,54 @@
 services:
+
+  # ── Message Broker ───────────────────────────────────────────────────────
   kafka:
     image: apache/kafka:3.9.0
     container_name: kafka
     ports:
       - "9092:9092"
     environment:
-      # KRaft mode (no Zookeeper)
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-
-      # Two listeners: INTERNAL for containers, EXTERNAL for host machine
       KAFKA_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://kafka:9092,CONTROLLER://kafka:9093
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://${AWS_PUBLIC_HOST}:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-
-      # Topic defaults
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+  # ── YOLO Inference Workers ───────────────────────────────────────────────
+  yolo-worker-1:
+    build: ./Door-bell-backend/Python-engine
+    container_name: yolo-worker-1
+    env_file: .env
+    depends_on: [kafka]
+
+  yolo-worker-2:
+    build: ./Door-bell-backend/Python-engine
+    container_name: yolo-worker-2
+    env_file: .env
+    depends_on: [kafka]
+
+  yolo-worker-3:
+    build: ./Door-bell-backend/Python-engine
+    container_name: yolo-worker-3
+    env_file: .env
+    depends_on: [kafka]
+
+  # ── Java Backend ─────────────────────────────────────────────────────────
+  java-backend:
+    build: ./Door-bell-backend/Java-backend
+    container_name: java-backend
+    env_file: .env
+    ports:
+      - "${JAVA_SERVER_PORT}:8080"
+    depends_on: [kafka]
+
+  # ── Vector Database ──────────────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant
+    container_name: qdrant
+    ports:
+      - "6333:6333"
