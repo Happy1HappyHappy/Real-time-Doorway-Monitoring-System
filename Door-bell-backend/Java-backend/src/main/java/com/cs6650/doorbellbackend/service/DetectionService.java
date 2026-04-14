@@ -81,13 +81,14 @@ public class DetectionService {
             detectionRecordRepository.save(record);
 
             // Push to WebSocket
-            messagingTemplate.convertAndSend("/topic/detections", Map.of(
+            Map<String, Object> wsPayload = Map.of(
                     "personId", personId,
                     "cameraId", cameraId,
                     "trackId", detection.getTrackId(),
                     "confidence", detection.getConfidence(),
                     "timestamp", event.getTimestamp()
-            ));
+            );
+            messagingTemplate.convertAndSend((String) "/topic/detections", (Object) wsPayload);
         }
     }
 }

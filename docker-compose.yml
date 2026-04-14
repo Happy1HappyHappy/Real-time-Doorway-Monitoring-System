@@ -18,24 +18,50 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
 
+  # ── Media Server ─────────────────────────────────────────────────────────
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    ports:
+      - "8554:8554"   # RTSP
+      - "8889:8889"   # WebRTC (HTTP)
+      - "8890:8890/udp" # WebRTC (UDP)
+    environment:
+      MTX_PROTOCOLS: tcp
+      MTX_WEBRTCADDRESS: ":8889"
+
   # ── YOLO Inference Workers ───────────────────────────────────────────────
   yolo-worker-1:
     build: ./Door-bell-backend/Python-engine
     container_name: yolo-worker-1
     env_file: .env
-    depends_on: [kafka]
+    environment:
+      RTSP_INPUT: rtsp://mediamtx:8554/cam-01
+      RTSP_OUTPUT: rtsp://mediamtx:8554/cam-01/annotated
+      CAMERA_ID: cam-01
+    depends_on: [kafka, mediamtx]
 
   yolo-worker-2:
     build: ./Door-bell-backend/Python-engine
     container_name: yolo-worker-2
     env_file: .env
-    depends_on: [kafka]
+    profiles: [multi-cam]
+    environment:
+      RTSP_INPUT: rtsp://mediamtx:8554/cam-02
+      RTSP_OUTPUT: rtsp://mediamtx:8554/cam-02/annotated
+      CAMERA_ID: cam-02
+    depends_on: [kafka, mediamtx]
 
   yolo-worker-3:
     build: ./Door-bell-backend/Python-engine
     container_name: yolo-worker-3
     env_file: .env
-    depends_on: [kafka]
+    profiles: [multi-cam]
+    environment:
+      RTSP_INPUT: rtsp://mediamtx:8554/cam-03
+      RTSP_OUTPUT: rtsp://mediamtx:8554/cam-03/annotated
+      CAMERA_ID: cam-03
+    depends_on: [kafka, mediamtx]
 
   # ── Java Backend ─────────────────────────────────────────────────────────
   java-backend:
