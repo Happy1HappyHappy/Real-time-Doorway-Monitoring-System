@@ -22,6 +22,7 @@ import cv2
 from datetime import datetime
 from confluent_kafka import Consumer, Producer, KafkaError
 from ultralytics import YOLO
+from reid_extractor import extract_embedding
 
 # ── Config ───────────────────────────────────────────────────────────────────
 KAFKA_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
@@ -89,10 +90,12 @@ class InferenceWorker:
 
             for i, tid in enumerate(boxes.id.int().tolist()):
                 if tid in newly_seen:
+                    bbox = [round(v, 3) for v in xywh[i]]
+                    embedding = extract_embedding(frame, xywh[i])
                     detections.append({
                         "trackId": tid,
-                        "bbox": [round(v, 3) for v in xywh[i]],
-                        "embedding": [],    # TODO: add ReID embedding
+                        "bbox": bbox,
+                        "embedding": embedding,
                         "confidence": round(confs[i], 3),
                     })
         else:
