@@ -45,13 +45,6 @@ services:
       RTSP_OUTPUT: rtsp://mediamtx:8554/cam-01/annotated
       CAMERA_ID: cam-01
     depends_on: [kafka, mediamtx]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
   yolo-worker-2:
     build: ./Door-bell-backend/Python-engine
@@ -63,13 +56,6 @@ services:
       RTSP_OUTPUT: rtsp://mediamtx:8554/cam-02/annotated
       CAMERA_ID: cam-02
     depends_on: [kafka, mediamtx]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
   yolo-worker-3:
     build: ./Door-bell-backend/Python-engine
@@ -81,13 +67,14 @@ services:
       RTSP_OUTPUT: rtsp://mediamtx:8554/cam-03/annotated
       CAMERA_ID: cam-03
     depends_on: [kafka, mediamtx]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+
+  # ── Frontend ─────────────────────────────────────────────────────────────
+  frontend:
+    build: ./Door-bell-frontend
+    container_name: frontend
+    ports:
+      - "80:80"
+    depends_on: [java-backend, mediamtx]
 
   # ── Java Backend ─────────────────────────────────────────────────────────
   java-backend:
