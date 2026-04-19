@@ -28,13 +28,16 @@ services:
       - "8189:8189/udp"
     environment:
       MTX_WEBRTCADDRESS: ":8889"
-      MTX_WEBRTCICEHOSTS: "127.0.0.1"
-      MTX_WEBRTCADDITIONALHOSTS: "127.0.0.1"
+      MTX_WEBRTCICEHOSTS: "${WEBRTC_ICE_HOST:-127.0.0.1}"
+      MTX_WEBRTCADDITIONALHOSTS: "${WEBRTC_ICE_HOST:-127.0.0.1}"
       MTX_WEBRTCICEUDPMUXADDRESS: ":8189"
 
   # ── YOLO Inference Workers ───────────────────────────────────────────────
   yolo-worker-1:
-    build: ./Door-bell-backend/Python-engine
+    build:
+      context: ./Door-bell-backend/Python-engine
+      args:
+        CUDA_BASE: ${YOLO_BASE_IMAGE:-python:3.11-slim}
     container_name: yolo-worker-1
     env_file: .env
     environment:
@@ -42,6 +45,13 @@ services:
       RTSP_OUTPUT: rtsp://mediamtx:8554/cam-01/annotated
       CAMERA_ID: cam-01
     depends_on: [kafka, mediamtx]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   yolo-worker-2:
     build: ./Door-bell-backend/Python-engine
@@ -53,6 +63,13 @@ services:
       RTSP_OUTPUT: rtsp://mediamtx:8554/cam-02/annotated
       CAMERA_ID: cam-02
     depends_on: [kafka, mediamtx]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   yolo-worker-3:
     build: ./Door-bell-backend/Python-engine
@@ -64,6 +81,13 @@ services:
       RTSP_OUTPUT: rtsp://mediamtx:8554/cam-03/annotated
       CAMERA_ID: cam-03
     depends_on: [kafka, mediamtx]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # ── Java Backend ─────────────────────────────────────────────────────────
   java-backend:
