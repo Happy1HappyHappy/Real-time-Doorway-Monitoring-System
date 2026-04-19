@@ -20,10 +20,16 @@ public class DetectionConsumer {
     public void consume(String message) {
         try {
             DetectionEvent event = objectMapper.readValue(message, DetectionEvent.class);
-            log.info("Received detection from camera={}, persons={}",
-                    event.getCameraId(), event.getDetections().size());
 
-            detectionService.processDetection(event);
+            if ("left".equals(event.getType())) {
+                log.info("Received left event from camera={}, trackIds={}",
+                        event.getCameraId(), event.getLeftTrackIds());
+                detectionService.processLeft(event);
+            } else {
+                log.info("Received detection from camera={}, persons={}",
+                        event.getCameraId(), event.getDetections().size());
+                detectionService.processDetection(event);
+            }
         } catch (Exception e) {
             log.error("Failed to process detection event: {}", e.getMessage(), e);
         }

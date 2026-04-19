@@ -79,7 +79,7 @@ public class QdrantService {
             if (result != null && !result.isEmpty()) {
                 long personId = result.get(0).get("payload").get("personId").asLong();
                 double score = result.get(0).get("score").asDouble();
-                log.info("Qdrant match: personId={} score={}", personId, score);
+                log.info("[RE-ID] Qdrant match: personId={} score={}", personId, String.format("%.4f", score));
                 return Optional.of(personId);
             }
         } catch (Exception e) {
