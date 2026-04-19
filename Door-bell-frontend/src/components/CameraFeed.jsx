@@ -32,9 +32,14 @@ export default function CameraFeed({ cameraId, positions = [] }) {
         pcRef.current = pc;
 
         pc.addTransceiver("video", { direction: "recvonly" });
-        pc.addTransceiver("audio", { direction: "recvonly" });
 
         pc.ontrack = (event) => {
+          if (event.receiver && "playoutDelayHint" in event.receiver) {
+            event.receiver.playoutDelayHint = 0;
+          }
+          if (event.receiver && "jitterBufferTarget" in event.receiver) {
+            event.receiver.jitterBufferTarget = 0;
+          }
           if (videoRef.current && event.track.kind === "video") {
             videoRef.current.srcObject = event.streams[0];
             setStatus("live");
