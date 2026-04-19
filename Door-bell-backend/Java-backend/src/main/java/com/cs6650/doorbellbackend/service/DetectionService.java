@@ -11,9 +11,12 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
@@ -25,7 +28,14 @@ public class DetectionService {
     private final DetectionRecordRepository detectionRecordRepository;
     private final SimpMessagingTemplate messagingTemplate;
 
+    // trackId → personId cache per camera
+    private final ConcurrentHashMap<String, Map<Integer, Long>> trackPersonCache = new ConcurrentHashMap<>();
+
     public void processLeft(DetectionEvent event) {
+        Map<Integer, Long> cache = trackPersonCache.get(event.getCameraId());
+        if (cache != null && event.getLeftTrackIds() != null) {
+            event.getLeftTrackIds().forEach(cache::remove);
+        }
         Map<String, Object> wsPayload = Map.of(
                 "type", "left",
                 "cameraId", event.getCameraId(),
@@ -103,19 +113,47 @@ public class DetectionService {
             long dbMs = System.currentTimeMillis() - dbStart;
             log.info("[LATENCY] [{}] postgres_save={}ms", cameraId, dbMs);
 
+            // Cache trackId → personId for position updates
+            trackPersonCache.computeIfAbsent(cameraId, k -> new ConcurrentHashMap<>())
+                    .put(detection.getTrackId(), personId);
+
             // Push to WebSocket
             long totalMs = System.currentTimeMillis() - pipelineStart;
-            Map<String, Object> wsPayload = Map.of(
-                    "type", "detection",
-                    "personId", personId,
-                    "cameraId", cameraId,
-                    "trackId", detection.getTrackId(),
-                    "confidence", detection.getConfidence(),
-                    "timestamp", event.getTimestamp()
-            );
+            Map<String, Object> wsPayload = new HashMap<>();
+            wsPayload.put("type", "detection");
+            wsPayload.put("personId", personId);
+            wsPayload.put("cameraId", cameraId);
+            wsPayload.put("trackId", detection.getTrackId());
+            wsPayload.put("confidence", detection.getConfidence());
+            wsPayload.put("timestamp", event.getTimestamp());
+            wsPayload.put("bbox", detection.getBbox());
             messagingTemplate.convertAndSend((String) "/topic/detections", (Object) wsPayload);
 
             log.info("[LATENCY] [{}] java_total={}ms (qdrant+db+ws)", cameraId, totalMs);
+        }
+    }
+
+    public void processPosition(DetectionEvent event) {
+        String cameraId = event.getCameraId();
+        Map<Integer, Long> cache = trackPersonCache.getOrDefault(cameraId, Map.of());
+        if (cache.isEmpty() || event.getTracks() == null) return;
+
+        List<Map<String, Object>> tracks = new ArrayList<>();
+        for (DetectionEvent.TrackPosition t : event.getTracks()) {
+            Long personId = cache.get(t.getTrackId());
+            if (personId == null) continue;
+            Map<String, Object> entry = new HashMap<>();
+            entry.put("personId", personId);
+            entry.put("bbox", t.getBbox());
+            tracks.add(entry);
+        }
+
+        if (!tracks.isEmpty()) {
+            Map<String, Object> wsPayload = new HashMap<>();
+            wsPayload.put("type", "position");
+            wsPayload.put("cameraId", cameraId);
+            wsPayload.put("tracks", tracks);
+            messagingTemplate.convertAndSend((String) "/topic/detections", (Object) wsPayload);
         }
     }
 }

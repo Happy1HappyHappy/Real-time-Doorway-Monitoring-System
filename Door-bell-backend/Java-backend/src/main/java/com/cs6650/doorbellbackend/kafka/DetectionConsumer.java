@@ -25,6 +25,8 @@ public class DetectionConsumer {
                 log.info("Received left event from camera={}, trackIds={}",
                         event.getCameraId(), event.getLeftTrackIds());
                 detectionService.processLeft(event);
+            } else if ("position".equals(event.getType())) {
+                detectionService.processPosition(event);
             } else {
                 log.info("Received detection from camera={}, persons={}",
                         event.getCameraId(), event.getDetections().size());

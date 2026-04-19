@@ -147,7 +147,7 @@ class InferenceWorker:
         )
         t_yolo = (time.time() - t0) * 1000
 
-        annotated = results[0].plot()
+        annotated = results[0].plot(conf=False, labels=False)
         boxes = results[0].boxes
         detections = []
 
@@ -230,7 +230,13 @@ class InferenceWorker:
         if detections or t_reid_total > 0:
             print(f"  [{CAMERA_ID}] TIMING | yolo={t_yolo:.0f}ms | reid={t_reid_total:.0f}ms | total_python={t_yolo + t_reid_total:.0f}ms")
 
-        return annotated, detections, left_ids
+        # Collect current positions of all active tracks
+        positions = []
+        if boxes is not None and boxes.id is not None:
+            for i, tid in enumerate(id_list):
+                positions.append({"trackId": tid, "bbox": [round(v, 3) for v in xywh[i]]})
+
+        return annotated, detections, left_ids, positions
 
     def run(self):
         """Main loop: pull RTSP -> infer -> push annotated RTSP + Kafka."""
@@ -289,7 +295,7 @@ class InferenceWorker:
                 t_infer_start = time.time()
 
                 # Run inference
-                annotated, detections, left_ids = self._process_frame(frame)
+                annotated, detections, left_ids, positions = self._process_frame(frame)
                 frame_count += 1
 
                 t_infer_ms = (time.time() - t_infer_start) * 1000
@@ -346,6 +352,21 @@ class InferenceWorker:
                     )
                     self.producer.poll(0)
                     print(f"  [{CAMERA_ID}] KAFKA >>> LEFT trackIds={list(left_ids)}")
+
+                # Send position update to Kafka every frame
+                if positions:
+                    pos_event = {
+                        "type": "position",
+                        "cameraId": CAMERA_ID,
+                        "timestamp": datetime.now().isoformat(),
+                        "tracks": positions,
+                    }
+                    self.producer.produce(
+                        TOPIC_DETECTIONS,
+                        key=CAMERA_ID,
+                        value=json.dumps(pos_event),
+                    )
+                    self.producer.poll(0)
 
                 # Periodic status log (every 5 seconds)
                 now = time.time()

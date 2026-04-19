@@ -11,12 +11,19 @@ public class DetectionEvent {
     private Long kafkaProducedAt;
     private List<PersonDetection> detections;
     private List<Integer> leftTrackIds; // only for type="left"
+    private List<TrackPosition> tracks; // only for type="position"
 
     @Data
     public static class PersonDetection {
         private int trackId;
-        private List<Double> bbox; // Frame to draw around the person
-        private List<Double> embedding; // Vector that related to the person
+        private List<Double> bbox;
+        private List<Double> embedding;
         private double confidence;
+    }
+
+    @Data
+    public static class TrackPosition {
+        private int trackId;
+        private List<Double> bbox;
     }
 }
