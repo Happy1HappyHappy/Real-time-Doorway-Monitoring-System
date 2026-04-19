@@ -26,7 +26,11 @@ def _load_model():
     if _model is not None:
         return _model, _device
 
-    _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _device = torch.device(
+        "mps" if torch.backends.mps.is_available()
+        else "cuda" if torch.cuda.is_available()
+        else "cpu"
+    )
 
     # Use torchreid's OSNet (small, fast, good accuracy)
     from torchreid.reid.utils import FeatureExtractor

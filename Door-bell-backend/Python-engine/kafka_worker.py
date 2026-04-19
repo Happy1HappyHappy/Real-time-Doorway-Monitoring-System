@@ -11,6 +11,7 @@ Env vars:
   MODEL_PATH               - YOLO model path (default: "yolov8n.pt")
   CONFIDENCE               - detection confidence threshold (default: 0.35)
   OUTPUT_FPS               - annotated stream FPS (default: 15)
+  RTSP_CONNECT_RETRIES     - RTSP connect retries, 0 means infinite (default: 0)
 """
 
 import os
@@ -34,11 +35,25 @@ TOPIC_DETECTIONS = os.environ.get("KAFKA_TOPIC_DETECTIONS", "doorbell-detections
 MODEL_PATH = os.environ.get("MODEL_PATH", "yolov8n.pt")
 CONFIDENCE = float(os.environ.get("CONFIDENCE", "0.35"))
 OUTPUT_FPS = int(os.environ.get("OUTPUT_FPS", "15"))
+RTSP_CONNECT_RETRIES = int(os.environ.get("RTSP_CONNECT_RETRIES", "0"))
+DEVICE = os.environ.get("DEVICE", "auto")
+
+
+def _resolve_device() -> str:
+    if DEVICE != "auto":
+        return DEVICE
+    import torch
+    if torch.backends.mps.is_available():
+        return "mps"
+    if torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
 
 
 class InferenceWorker:
     def __init__(self):
-        print(f"Loading YOLO model: {MODEL_PATH}")
+        self.device = _resolve_device()
+        print(f"Loading YOLO model: {MODEL_PATH} on device={self.device}")
         self.model = YOLO(MODEL_PATH)
 
         self.producer = Producer({
@@ -53,8 +68,31 @@ class InferenceWorker:
 
         print(f"Worker ready | input={RTSP_INPUT} output={RTSP_OUTPUT}")
 
+    def _open_rtsp_input(self):
+        """Connect to the RTSP input, waiting forever by default."""
+        attempt = 0
+
+        while True:
+            attempt += 1
+            cap = cv2.VideoCapture(RTSP_INPUT, cv2.CAP_FFMPEG)
+            if cap.isOpened():
+                return cap
+
+            try:
+                cap.release()
+            except Exception:
+                pass
+
+            if RTSP_CONNECT_RETRIES > 0:
+                print(f"  Waiting for RTSP stream... (attempt {attempt}/{RTSP_CONNECT_RETRIES})")
+                if attempt >= RTSP_CONNECT_RETRIES:
+                    return None
+            else:
+                print(f"  Waiting for RTSP stream... (attempt {attempt})")
+
+            time.sleep(2)
+
     def _start_ffmpeg_output(self, width, height):
-        """Start FFmpeg process to push annotated frames to MediaMTX."""
         cmd = [
             "ffmpeg",
             "-y",
@@ -64,6 +102,7 @@ class InferenceWorker:
             "-r", str(OUTPUT_FPS),
             "-i", "-",
             "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
             "-preset", "ultrafast",
             "-tune", "zerolatency",
             "-g", str(OUTPUT_FPS * 2),
@@ -82,6 +121,7 @@ class InferenceWorker:
 
     def _process_frame(self, frame: np.ndarray) -> list:
         """Run YOLO + BoTSORT, return annotated frame and new detections."""
+        t0 = time.time()
         results = self.model.track(
             frame,
             persist=True,
@@ -90,15 +130,20 @@ class InferenceWorker:
             conf=CONFIDENCE,
             iou=0.5,
             verbose=False,
+            device=self.device,
         )
+        t_yolo = (time.time() - t0) * 1000
 
         annotated = results[0].plot()
         boxes = results[0].boxes
         detections = []
 
+        t_reid_total = 0.0
+        left_ids = set()
         if boxes is not None and boxes.id is not None:
             current_ids = set(boxes.id.int().tolist())
             newly_seen = current_ids - self._active_ids
+            left_ids = self._active_ids - current_ids
             self._active_ids = current_ids
 
             confs = boxes.conf.tolist()
@@ -107,7 +152,9 @@ class InferenceWorker:
             for i, tid in enumerate(boxes.id.int().tolist()):
                 if tid in newly_seen:
                     bbox = [round(v, 3) for v in xywh[i]]
+                    t_re = time.time()
                     embedding = extract_embedding(frame, xywh[i])
+                    t_reid_total += (time.time() - t_re) * 1000
                     detections.append({
                         "trackId": tid,
                         "bbox": bbox,
@@ -115,42 +162,61 @@ class InferenceWorker:
                         "confidence": round(confs[i], 3),
                     })
         else:
+            left_ids = set(self._active_ids)
             self._active_ids = set()
 
-        return annotated, detections
+        if detections:
+            print(f"  [{CAMERA_ID}] TIMING | yolo={t_yolo:.0f}ms | reid={t_reid_total:.0f}ms | total_python={t_yolo + t_reid_total:.0f}ms")
+
+        return annotated, detections, left_ids
 
     def run(self):
         """Main loop: pull RTSP -> infer -> push annotated RTSP + Kafka."""
         print(f"Connecting to {RTSP_INPUT}...")
 
-        # Retry loop for RTSP connection (MediaMTX or Edge might not be ready)
-        cap = None
-        for attempt in range(30):
-            cap = cv2.VideoCapture(RTSP_INPUT, cv2.CAP_FFMPEG)
-            if cap.isOpened():
-                break
-            print(f"  Waiting for RTSP stream... (attempt {attempt + 1}/30)")
-            time.sleep(2)
-
+        cap = self._open_rtsp_input()
         if cap is None or not cap.isOpened():
             print(f"ERROR: Cannot open RTSP stream {RTSP_INPUT}")
             sys.exit(1)
 
+        # Log stream info
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
         print(f"Connected to {RTSP_INPUT}")
+        print(f"  [{CAMERA_ID}] Stream info: {w}x{h} @ {fps:.1f}fps")
+
+        # Read first frame to confirm we can actually decode
+        ret, first_frame = cap.read()
+        if ret:
+            print(f"  [{CAMERA_ID}] First frame received: shape={first_frame.shape} dtype={first_frame.dtype}")
+        else:
+            print(f"  [{CAMERA_ID}] WARNING: Connected but cannot read first frame!")
+
         frame_count = 0
+        last_log_time = time.time()
+        dropped_frames = 0
 
         try:
             while True:
                 # Drain buffer — always grab the latest frame to avoid lag
                 ret = cap.grab()
                 if not ret:
-                    time.sleep(0.1)
+                    dropped_frames += 1
+                    if dropped_frames % 50 == 1:
+                        print(f"  [{CAMERA_ID}] RTSP read failed (dropped={dropped_frames}), reconnecting...")
+                    cap.release()
+                    cap = self._open_rtsp_input()
+                    if cap is None or not cap.isOpened():
+                        print(f"ERROR: Cannot reopen RTSP stream {RTSP_INPUT}")
+                        break
                     continue
                 # Skip stale buffered frames, only decode the newest one
                 for _ in range(4):
                     cap.grab()
                 ret, frame = cap.retrieve()
                 if not ret:
+                    dropped_frames += 1
                     continue
 
                 # Start FFmpeg output on first frame (to get actual resolution)
@@ -158,14 +224,20 @@ class InferenceWorker:
                     h, w = frame.shape[:2]
                     self._start_ffmpeg_output(w, h)
 
+                t_infer_start = time.time()
+
                 # Run inference
-                annotated, detections = self._process_frame(frame)
+                annotated, detections, left_ids = self._process_frame(frame)
                 frame_count += 1
 
+                t_infer_ms = (time.time() - t_infer_start) * 1000
+
                 # Push annotated frame to MediaMTX (best-effort, never kills the worker)
+                mediamtx_ok = False
                 if self._ffmpeg_out is not None:
                     try:
                         self._ffmpeg_out.stdin.write(annotated.tobytes())
+                        mediamtx_ok = True
                     except BrokenPipeError:
                         print(f"  [{CAMERA_ID}] FFmpeg pipe broken, restarting output stream...")
                         try:
@@ -176,11 +248,30 @@ class InferenceWorker:
                         h, w = frame.shape[:2]
                         self._start_ffmpeg_output(w, h)
 
-                # Send new detections to Kafka
-                if detections:
-                    event = {
+                # Send left events to Kafka
+                if left_ids:
+                    left_event = {
+                        "type": "left",
                         "cameraId": CAMERA_ID,
                         "timestamp": datetime.now().isoformat(),
+                        "leftTrackIds": list(left_ids),
+                    }
+                    self.producer.produce(
+                        TOPIC_DETECTIONS,
+                        key=CAMERA_ID,
+                        value=json.dumps(left_event),
+                    )
+                    self.producer.poll(0)
+                    print(f"  [{CAMERA_ID}] KAFKA >>> LEFT trackIds={list(left_ids)}")
+
+                # Send new detections to Kafka
+                kafka_sent = 0
+                if detections:
+                    event = {
+                        "type": "detection",
+                        "cameraId": CAMERA_ID,
+                        "timestamp": datetime.now().isoformat(),
+                        "kafkaProducedAt": int(time.time() * 1000),
                         "detections": detections,
                     }
                     self.producer.produce(
@@ -189,12 +280,26 @@ class InferenceWorker:
                         value=json.dumps(event),
                     )
                     self.producer.poll(0)
+                    kafka_sent = len(detections)
 
                     for d in detections:
-                        print(f"  [{CAMERA_ID}] NEW person trackId={d['trackId']} conf={d['confidence']}")
+                        print(f"  [{CAMERA_ID}] KAFKA >>> NEW person trackId={d['trackId']} conf={d['confidence']} embedding_dim={len(d['embedding'])}")
 
-                if frame_count % 100 == 0:
-                    print(f"  [{CAMERA_ID}] Processed {frame_count} frames")
+                # Periodic status log (every 5 seconds)
+                now = time.time()
+                elapsed = now - last_log_time
+                if elapsed >= 5.0:
+                    actual_fps = frame_count / (now - last_log_time) if last_log_time else 0
+                    print(
+                        f"  [{CAMERA_ID}] STATUS | frame={frame_count} "
+                        f"| fps={actual_fps:.1f} "
+                        f"| infer={t_infer_ms:.0f}ms "
+                        f"| dropped={dropped_frames} "
+                        f"| MediaMTX={'OK' if mediamtx_ok else 'FAIL'} "
+                        f"| Kafka_sent={kafka_sent} "
+                        f"| tracking={len(self._active_ids)} persons"
+                    )
+                    last_log_time = now
 
         except KeyboardInterrupt:
             print("Shutting down worker...")

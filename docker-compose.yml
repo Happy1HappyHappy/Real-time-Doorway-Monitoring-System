@@ -23,12 +23,14 @@ services:
     image: bluenviron/mediamtx:latest
     container_name: mediamtx
     ports:
-      - "8554:8554"   # RTSP
-      - "8889:8889"   # WebRTC (HTTP)
-      - "8890:8890/udp" # WebRTC (UDP)
+      - "8554:8554"
+      - "8889:8889"
+      - "8189:8189/udp"
     environment:
-      MTX_PROTOCOLS: tcp
       MTX_WEBRTCADDRESS: ":8889"
+      MTX_WEBRTCICEHOSTS: "127.0.0.1"
+      MTX_WEBRTCADDITIONALHOSTS: "127.0.0.1"
+      MTX_WEBRTCICEUDPMUXADDRESS: ":8189"
 
   # ── YOLO Inference Workers ───────────────────────────────────────────────
   yolo-worker-1:
