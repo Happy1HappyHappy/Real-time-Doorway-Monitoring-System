@@ -33,10 +33,21 @@ CAMERA_ID = os.environ.get("CAMERA_ID", "cam-01")
 KAFKA_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 TOPIC_DETECTIONS = os.environ.get("KAFKA_TOPIC_DETECTIONS", "doorbell-detections")
 MODEL_PATH = os.environ.get("MODEL_PATH", "yolov8n.pt")
-CONFIDENCE = float(os.environ.get("CONFIDENCE", "0.35"))
+CONFIDENCE = float(os.environ.get("CONFIDENCE", "0.50"))
 OUTPUT_FPS = int(os.environ.get("OUTPUT_FPS", "15"))
 RTSP_CONNECT_RETRIES = int(os.environ.get("RTSP_CONNECT_RETRIES", "0"))
 DEVICE = os.environ.get("DEVICE", "auto")
+EMBEDDING_FRAMES = int(os.environ.get("EMBEDDING_FRAMES", "5"))
+
+
+def _average_embeddings(embeddings: list) -> list:
+    """Average multiple embeddings and L2-normalize the result."""
+    arr = np.array(embeddings)
+    avg = arr.mean(axis=0)
+    norm = np.linalg.norm(avg)
+    if norm > 0:
+        avg = avg / norm
+    return avg.tolist()
 
 
 def _resolve_device() -> str:
@@ -63,6 +74,7 @@ class InferenceWorker:
         })
 
         self._active_ids = set()
+        self._pending: dict = {}  # tid -> {embeddings, bbox, confidence}
         self._ffmpeg_out = None
         self._frame_size = None
 
@@ -148,24 +160,73 @@ class InferenceWorker:
 
             confs = boxes.conf.tolist()
             xywh = boxes.xywhn.tolist()
+            id_list = boxes.id.int().tolist()
 
-            for i, tid in enumerate(boxes.id.int().tolist()):
+            # Initialize pending buffer for newly appeared tracks
+            for i, tid in enumerate(id_list):
                 if tid in newly_seen:
-                    bbox = [round(v, 3) for v in xywh[i]]
-                    t_re = time.time()
-                    embedding = extract_embedding(frame, xywh[i])
-                    t_reid_total += (time.time() - t_re) * 1000
+                    self._pending[tid] = {
+                        "embeddings": [],
+                        "bbox": [round(v, 3) for v in xywh[i]],
+                        "confidence": round(confs[i], 3),
+                    }
+
+            # Collect one embedding per frame for all pending tracks
+            for i, tid in enumerate(id_list):
+                if tid not in self._pending:
+                    continue
+                pending = self._pending[tid]
+                if len(pending["embeddings"]) >= EMBEDDING_FRAMES:
+                    continue
+
+                t_re = time.time()
+                embedding = extract_embedding(frame, xywh[i])
+                t_reid_total += (time.time() - t_re) * 1000
+
+                if embedding:
+                    pending["embeddings"].append(embedding)
+
+                # Enough frames collected — finalize this track
+                if len(pending["embeddings"]) >= EMBEDDING_FRAMES:
+                    avg_emb = _average_embeddings(pending["embeddings"])
                     detections.append({
                         "trackId": tid,
-                        "bbox": bbox,
-                        "embedding": embedding,
-                        "confidence": round(confs[i], 3),
+                        "bbox": pending["bbox"],
+                        "embedding": avg_emb,
+                        "confidence": pending["confidence"],
                     })
+                    print(f"  [{CAMERA_ID}] REID finalized trackId={tid} frames={EMBEDDING_FRAMES}")
+                    del self._pending[tid]
+
+            # Flush tracks that left before collecting enough frames
+            for tid in left_ids:
+                if tid in self._pending:
+                    pending = self._pending.pop(tid)
+                    if pending["embeddings"]:
+                        avg_emb = _average_embeddings(pending["embeddings"])
+                        detections.append({
+                            "trackId": tid,
+                            "bbox": pending["bbox"],
+                            "embedding": avg_emb,
+                            "confidence": pending["confidence"],
+                        })
+                        print(f"  [{CAMERA_ID}] REID flushed trackId={tid} frames={len(pending['embeddings'])}/{EMBEDDING_FRAMES}")
         else:
             left_ids = set(self._active_ids)
             self._active_ids = set()
+            # Flush all pending tracks when no boxes detected
+            for tid, pending in list(self._pending.items()):
+                if pending["embeddings"]:
+                    avg_emb = _average_embeddings(pending["embeddings"])
+                    detections.append({
+                        "trackId": tid,
+                        "bbox": pending["bbox"],
+                        "embedding": avg_emb,
+                        "confidence": pending["confidence"],
+                    })
+            self._pending.clear()
 
-        if detections:
+        if detections or t_reid_total > 0:
             print(f"  [{CAMERA_ID}] TIMING | yolo={t_yolo:.0f}ms | reid={t_reid_total:.0f}ms | total_python={t_yolo + t_reid_total:.0f}ms")
 
         return annotated, detections, left_ids
@@ -248,23 +309,7 @@ class InferenceWorker:
                         h, w = frame.shape[:2]
                         self._start_ffmpeg_output(w, h)
 
-                # Send left events to Kafka
-                if left_ids:
-                    left_event = {
-                        "type": "left",
-                        "cameraId": CAMERA_ID,
-                        "timestamp": datetime.now().isoformat(),
-                        "leftTrackIds": list(left_ids),
-                    }
-                    self.producer.produce(
-                        TOPIC_DETECTIONS,
-                        key=CAMERA_ID,
-                        value=json.dumps(left_event),
-                    )
-                    self.producer.poll(0)
-                    print(f"  [{CAMERA_ID}] KAFKA >>> LEFT trackIds={list(left_ids)}")
-
-                # Send new detections to Kafka
+                # Send new detections to Kafka first (must arrive before left events)
                 kafka_sent = 0
                 if detections:
                     event = {
@@ -284,6 +329,22 @@ class InferenceWorker:
 
                     for d in detections:
                         print(f"  [{CAMERA_ID}] KAFKA >>> NEW person trackId={d['trackId']} conf={d['confidence']} embedding_dim={len(d['embedding'])}")
+
+                # Send left events to Kafka (after detections to preserve ordering)
+                if left_ids:
+                    left_event = {
+                        "type": "left",
+                        "cameraId": CAMERA_ID,
+                        "timestamp": datetime.now().isoformat(),
+                        "leftTrackIds": list(left_ids),
+                    }
+                    self.producer.produce(
+                        TOPIC_DETECTIONS,
+                        key=CAMERA_ID,
+                        value=json.dumps(left_event),
+                    )
+                    self.producer.poll(0)
+                    print(f"  [{CAMERA_ID}] KAFKA >>> LEFT trackIds={list(left_ids)}")
 
                 # Periodic status log (every 5 seconds)
                 now = time.time()

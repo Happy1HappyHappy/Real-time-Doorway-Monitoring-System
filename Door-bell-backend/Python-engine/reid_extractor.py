@@ -32,10 +32,9 @@ def _load_model():
         else "cpu"
     )
 
-    # Use torchreid's OSNet (small, fast, good accuracy)
     from torchreid.reid.utils import FeatureExtractor
     _model = FeatureExtractor(
-        model_name="osnet_x0_25",
+        model_name="osnet_x1_0",
         model_path="",  # auto-downloads pretrained weights
         device=str(_device),
     )
@@ -69,7 +68,7 @@ def extract_embedding(frame: np.ndarray, bbox_xywhn: list) -> list:
     x2 = min(w, x2)
     y2 = min(h, y2)
 
-    if x2 - x1 < 10 or y2 - y1 < 10:
+    if x2 - x1 < 80 or y2 - y1 < 200:
         return []
 
     crop = frame[y1:y2, x1:x2]
