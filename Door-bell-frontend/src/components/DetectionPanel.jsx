@@ -1,5 +1,8 @@
+const CAMERAS = ["cam-01", "cam-02", "cam-03"];
+
 export default function DetectionPanel({ livePersons = {}, history = [], connected = false }) {
   const totalLive = Object.values(livePersons).reduce((sum, arr) => sum + arr.length, 0);
+  const totalUnique = new Set(history.map((h) => h.personId)).size;
 
   return (
     <div className="detection-panel">
@@ -12,6 +15,18 @@ export default function DetectionPanel({ livePersons = {}, history = [], connect
 
       <div className="live-section">
         <h3>Currently Visible ({totalLive})</h3>
+        <div className="summary-stats">
+          <div className="stat-row">
+            <span>Total unique seen:</span>
+            <strong>{totalUnique}</strong>
+          </div>
+          {CAMERAS.map((cam) => (
+            <div key={cam} className="stat-row">
+              <span>{cam}:</span>
+              <strong>{(livePersons[cam] || []).length}</strong>
+            </div>
+          ))}
+        </div>
         {Object.entries(livePersons).length === 0 ? (
           <p className="empty-state">No one detected</p>
         ) : (
