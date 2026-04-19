@@ -27,6 +27,7 @@ services:
       - "8889:8889"
       - "8189:8189/udp"
     environment:
+      MTX_PROTOCOLS: tcp
       MTX_WEBRTCADDRESS: ":8889"
       MTX_WEBRTCICEHOSTS: "${WEBRTC_ICE_HOST:-127.0.0.1}"
       MTX_WEBRTCADDITIONALHOSTS: "${WEBRTC_ICE_HOST:-127.0.0.1}"
