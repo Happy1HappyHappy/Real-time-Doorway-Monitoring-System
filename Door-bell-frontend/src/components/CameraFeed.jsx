@@ -1,9 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 
-/**
- * Connects to MediaMTX via WHEP (WebRTC) and displays the video stream.
- * Requests go through Vite proxy to avoid CORS issues.
- */
 export default function CameraFeed({ cameraId }) {
   const videoRef = useRef(null);
   const pcRef = useRef(null);
@@ -14,7 +10,6 @@ export default function CameraFeed({ cameraId }) {
     let aborted = false;
 
     async function connect() {
-      // Close previous connection before creating a new one
       if (pcRef.current) {
         pcRef.current.onconnectionstatechange = null;
         pcRef.current.close();
@@ -43,7 +38,6 @@ export default function CameraFeed({ cameraId }) {
           const state = pc.connectionState;
           if (state === "failed" || state === "disconnected" || state === "closed") {
             setStatus("disconnected");
-            // Auto-retry after 3 seconds
             if (!aborted) {
               retryRef.current = setTimeout(() => {
                 if (!aborted) connect();
@@ -55,7 +49,6 @@ export default function CameraFeed({ cameraId }) {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        // Goes through Vite proxy → MediaMTX :8889
         const whepUrl = `/${cameraId}/annotated/whep`;
         const res = await fetch(whepUrl, {
           method: "POST",
@@ -63,20 +56,16 @@ export default function CameraFeed({ cameraId }) {
           body: offer.sdp,
         });
 
-        if (!res.ok) {
-          throw new Error(`WHEP responded ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`WHEP responded ${res.status}`);
 
         const answer = await res.text();
         if (!aborted) {
           await pc.setRemoteDescription({ type: "answer", sdp: answer });
-          console.log(`[${cameraId}] WebRTC connected`);
         }
       } catch (err) {
         console.warn(`[${cameraId}] WebRTC error:`, err.message);
         if (!aborted) {
           setStatus("error");
-          // Retry after 5 seconds
           retryRef.current = setTimeout(() => {
             if (!aborted) connect();
           }, 5000);

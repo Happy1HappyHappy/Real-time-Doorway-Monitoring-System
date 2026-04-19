@@ -2,20 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 
-/**
- * Connects to Java Backend via WebSocket (STOMP over SockJS) and displays:
- * - Live detection events (who is currently seen)
- * - Detection history log
- */
 export default function DetectionPanel() {
-  const [livePersons, setLivePersons] = useState({});  // cameraId -> [persons]
+  const [livePersons, setLivePersons] = useState({});
   const [history, setHistory] = useState([]);
   const [connected, setConnected] = useState(false);
   const clientRef = useRef(null);
 
   useEffect(() => {
     const client = new Client({
-      // SockJS endpoint — goes through Vite proxy → Java Backend :8080
       webSocketFactory: () => new SockJS("/ws"),
       reconnectDelay: 3000,
       onConnect: () => {
@@ -25,7 +19,6 @@ export default function DetectionPanel() {
         client.subscribe("/topic/detections", (message) => {
           const event = JSON.parse(message.body);
 
-          // Person left the frame — remove immediately
           if (event.type === "left") {
             const { cameraId, trackIds } = event;
             setLivePersons((prev) => {
@@ -42,7 +35,6 @@ export default function DetectionPanel() {
             return;
           }
 
-          // New person detected
           const { personId, cameraId, trackId, confidence, timestamp } = event;
 
           setLivePersons((prev) => {
@@ -81,7 +73,6 @@ export default function DetectionPanel() {
     };
   }, []);
 
-  // Auto-clear stale live persons (no update for 5 seconds)
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
@@ -90,7 +81,7 @@ export default function DetectionPanel() {
         for (const [cam, persons] of Object.entries(prev)) {
           const active = persons.filter((p) => {
             const ts = new Date(p.timestamp);
-            return now - ts < 30000; // fallback if left event is lost
+            return now - ts < 30000;
           });
           if (active.length > 0) updated[cam] = active;
         }
@@ -104,7 +95,6 @@ export default function DetectionPanel() {
 
   return (
     <div className="detection-panel">
-      {/* Connection status */}
       <div className="panel-header">
         <h2>Detections</h2>
         <span className={`ws-status ${connected ? "connected" : "disconnected"}`}>
@@ -112,7 +102,6 @@ export default function DetectionPanel() {
         </span>
       </div>
 
-      {/* Live persons */}
       <div className="live-section">
         <h3>Currently Visible ({totalLive})</h3>
         {Object.entries(livePersons).length === 0 ? (
@@ -134,7 +123,6 @@ export default function DetectionPanel() {
         )}
       </div>
 
-      {/* History */}
       <div className="history-section">
         <h3>History</h3>
         <div className="history-list">
