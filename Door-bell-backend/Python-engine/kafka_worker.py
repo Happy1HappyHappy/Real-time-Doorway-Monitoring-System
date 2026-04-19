@@ -106,7 +106,7 @@ class InferenceWorker:
 
     def _start_ffmpeg_output(self, width, height):
         cmd = [
-            "ffmpeg",
+            "/usr/bin/ffmpeg",
             "-y",
             "-f", "rawvideo",
             "-pix_fmt", "bgr24",
