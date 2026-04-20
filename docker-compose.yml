@@ -69,6 +69,19 @@ services:
       CAMERA_ID: cam-03
     depends_on: [kafka, mediamtx]
 
+  # ── VLM Worker (Ollama client) ───────────────────────────────────────────
+  vlm-worker:
+    build: ./Door-bell-backend/VLM-worker
+    container_name: vlm-worker
+    env_file: .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5vl:3b}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: [kafka]
+
   # ── Frontend ─────────────────────────────────────────────────────────────
   frontend:
     build: ./Door-bell-frontend

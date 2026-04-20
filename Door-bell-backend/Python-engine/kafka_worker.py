@@ -18,6 +18,7 @@ import os
 import sys
 import json
 import time
+import base64
 import subprocess
 import numpy as np
 import cv2
@@ -32,12 +33,43 @@ RTSP_OUTPUT = os.environ.get("RTSP_OUTPUT", "rtsp://localhost:8554/cam-01/annota
 CAMERA_ID = os.environ.get("CAMERA_ID", "cam-01")
 KAFKA_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 TOPIC_DETECTIONS = os.environ.get("KAFKA_TOPIC_DETECTIONS", "doorbell-detections")
+TOPIC_ANALYSIS_REQUESTS = os.environ.get("KAFKA_TOPIC_ANALYSIS_REQUESTS", "doorbell-analysis-requests")
+ANALYSIS_CROP_MAX_SIZE = int(os.environ.get("ANALYSIS_CROP_MAX_SIZE", "512"))
+ANALYSIS_JPEG_QUALITY = int(os.environ.get("ANALYSIS_JPEG_QUALITY", "80"))
 MODEL_PATH = os.environ.get("MODEL_PATH", "yolov8n.pt")
 CONFIDENCE = float(os.environ.get("CONFIDENCE", "0.50"))
 OUTPUT_FPS = int(os.environ.get("OUTPUT_FPS", "15"))
 RTSP_CONNECT_RETRIES = int(os.environ.get("RTSP_CONNECT_RETRIES", "0"))
 DEVICE = os.environ.get("DEVICE", "auto")
 EMBEDDING_FRAMES = int(os.environ.get("EMBEDDING_FRAMES", "5"))
+
+
+def _crop_bbox(frame: np.ndarray, bbox_xywhn: list) -> np.ndarray:
+    """Crop a person from the frame given normalized xywh bbox."""
+    h, w = frame.shape[:2]
+    cx, cy, bw, bh = bbox_xywhn
+    x1 = max(0, int((cx - bw / 2) * w))
+    y1 = max(0, int((cy - bh / 2) * h))
+    x2 = min(w, int((cx + bw / 2) * w))
+    y2 = min(h, int((cy + bh / 2) * h))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return frame[y1:y2, x1:x2]
+
+
+def _encode_crop_b64(crop: np.ndarray) -> str:
+    """Resize crop (max side = ANALYSIS_CROP_MAX_SIZE) and return base64 JPEG."""
+    if crop is None or crop.size == 0:
+        return None
+    h, w = crop.shape[:2]
+    m = max(h, w)
+    if m > ANALYSIS_CROP_MAX_SIZE:
+        scale = ANALYSIS_CROP_MAX_SIZE / m
+        crop = cv2.resize(crop, (int(w * scale), int(h * scale)))
+    ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, ANALYSIS_JPEG_QUALITY])
+    if not ok:
+        return None
+    return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
 def _average_embeddings(embeddings: list) -> list:
@@ -159,6 +191,7 @@ class InferenceWorker:
         annotated = results[0].plot(conf=False, labels=False)
         boxes = results[0].boxes
         detections = []
+        analysis_requests = []
 
         t_reid_total = 0.0
         left_ids = set()
@@ -180,6 +213,15 @@ class InferenceWorker:
                         "bbox": [round(v, 3) for v in xywh[i]],
                         "confidence": round(confs[i], 3),
                     }
+                    # Crop this new person and queue a VLM analysis request
+                    crop = _crop_bbox(frame, xywh[i])
+                    img_b64 = _encode_crop_b64(crop)
+                    if img_b64:
+                        analysis_requests.append({
+                            "trackId": tid,
+                            "bbox": [round(v, 3) for v in xywh[i]],
+                            "imageJpegB64": img_b64,
+                        })
 
             # Collect one embedding per frame for all pending tracks
             for i, tid in enumerate(id_list):
@@ -245,7 +287,7 @@ class InferenceWorker:
             for i, tid in enumerate(id_list):
                 positions.append({"trackId": tid, "bbox": [round(v, 3) for v in xywh[i]]})
 
-        return annotated, detections, left_ids, positions
+        return annotated, detections, left_ids, positions, analysis_requests
 
     def run(self):
         """Main loop: pull RTSP -> infer -> push annotated RTSP + Kafka."""
@@ -304,7 +346,7 @@ class InferenceWorker:
                 t_infer_start = time.time()
 
                 # Run inference
-                annotated, detections, left_ids, positions = self._process_frame(frame)
+                annotated, detections, left_ids, positions, analysis_requests = self._process_frame(frame)
                 frame_count += 1
 
                 t_infer_ms = (time.time() - t_infer_start) * 1000
@@ -361,6 +403,24 @@ class InferenceWorker:
                     )
                     self.producer.poll(0)
                     print(f"  [{CAMERA_ID}] KAFKA >>> LEFT trackIds={list(left_ids)}")
+
+                # Send analysis requests (one per newly-seen track)
+                for req in analysis_requests:
+                    analysis_event = {
+                        "type": "analysis-request",
+                        "cameraId": CAMERA_ID,
+                        "timestamp": datetime.now().isoformat(),
+                        "trackId": req["trackId"],
+                        "bbox": req["bbox"],
+                        "imageJpegB64": req["imageJpegB64"],
+                    }
+                    self.producer.produce(
+                        TOPIC_ANALYSIS_REQUESTS,
+                        key=f"{CAMERA_ID}:{req['trackId']}",
+                        value=json.dumps(analysis_event),
+                    )
+                    self.producer.poll(0)
+                    print(f"  [{CAMERA_ID}] ANALYSIS REQUEST trackId={req['trackId']} bytes={len(req['imageJpegB64'])}")
 
                 # Send position update to Kafka every frame
                 if positions:

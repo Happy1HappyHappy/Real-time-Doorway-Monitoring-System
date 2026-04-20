@@ -1,6 +1,6 @@
 const CAMERAS = ["cam-01", "cam-02", "cam-03"];
 
-export default function DetectionPanel({ livePersons = {}, history = [], connected = false }) {
+export default function DetectionPanel({ livePersons = {}, history = [], analyses = {}, connected = false }) {
   const totalLive = Object.values(livePersons).reduce((sum, arr) => sum + arr.length, 0);
   const totalUnique = new Set(history.map((h) => h.personId)).size;
 
@@ -33,14 +33,34 @@ export default function DetectionPanel({ livePersons = {}, history = [], connect
           Object.entries(livePersons).map(([cam, persons]) => (
             <div key={cam} className="camera-group">
               <h4>{cam}</h4>
-              {persons.map((p) => (
-                <div key={p.trackId} className="person-card">
-                  <span className="person-id">Person #{p.personId}</span>
-                  <span className="person-meta">
-                    track={p.trackId} conf={p.confidence}
-                  </span>
-                </div>
-              ))}
+              {persons.map((p) => {
+                const a = analyses[`${cam}:${p.trackId}`];
+                return (
+                  <div
+                    key={p.trackId}
+                    className={`person-card ${a?.suspicious ? "suspicious" : ""}`}
+                  >
+                    <span className="person-id">Person #{p.personId}</span>
+                    <span className="person-meta">
+                      track={p.trackId} conf={p.confidence}
+                    </span>
+                    {a ? (
+                      a.error ? (
+                        <span className="person-desc error">VLM error: {a.error}</span>
+                      ) : (
+                        <>
+                          <span className="person-desc">{a.description}</span>
+                          {a.suspicious && (
+                            <span className="person-anomaly">⚠ {a.reason}</span>
+                          )}
+                        </>
+                      )
+                    ) : (
+                      <span className="person-desc pending">analysing…</span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ))
         )}
