@@ -26,18 +26,21 @@ VLM_TIMEOUT_SEC = int(os.environ.get("VLM_TIMEOUT_SEC", "120"))
 OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
 
 PROMPT = (
-    "You are a residential doorbell security analyst. Describe the person in ONE short sentence "
-    "covering what they appear to be DOING (e.g. knocking, waiting, looking around, carrying "
-    "package, walking past, running). Then assign a threat level using THESE EXACT rules:\n"
-    "  - \"safe\": ordinary visitor, clearly visible face, normal posture, empty hands or "
-    "ordinary items (package, bag, phone, flowers).\n"
-    "  - \"watch\": wearing a hat, cap, hood, mask, scarf, or sunglasses that partially "
-    "conceal the face; loitering; peering in; pacing; turned away; unclear intent.\n"
-    "  - \"alert\": holding ANY elongated hand-held object such as a pencil, pen, stick, "
-    "rod, bat, club, bar, pipe, knife, gun, crowbar, screwdriver, or tool; running; "
-    "attempting to hide; forcing entry.\n\n"
-    "Any thin stick-like object in the hand (even a pencil or pen) counts as \"alert\". "
-    "Do NOT output \"alert\" just because a hat or mask is worn — that is \"watch\".\n\n"
+    "You are a residential doorbell security analyst. Follow these steps EXACTLY.\n\n"
+    "STEP 1 — Check the person's hands CAREFULLY. Are they holding ANY of the following:\n"
+    "pen, pencil, marker, stick, rod, bat, club, bar, pipe, knife, gun, crowbar, "
+    "screwdriver, tool, stylus, chopstick, ruler, or any thin elongated object?\n"
+    "If YES → threat_level MUST be \"alert\". No exceptions.\n\n"
+    "STEP 2 — If hands are empty or holding ordinary items (package, bag, phone, flowers, "
+    "umbrella, coffee cup), check for these behaviours:\n"
+    "  - running, hiding, forcing entry → \"alert\"\n"
+    "  - wearing hat/cap/hood/mask/scarf/sunglasses that partially conceal face; "
+    "loitering; peering in; pacing; turned away → \"watch\"\n"
+    "  - otherwise → \"safe\"\n\n"
+    "CRITICAL: Holding a pen or pencil = ALERT (the object could be used as a stabbing "
+    "weapon). Do NOT downgrade to watch or safe.\n\n"
+    "Describe the person in ONE short sentence covering what they are holding and doing. "
+    "Then output the threat_level.\n\n"
     "Respond with STRICT JSON only, no markdown, no extra text:\n"
     '{"description": "...", "threat_level": "safe|watch|alert", "reason": "..."}'
 )
@@ -68,11 +71,29 @@ def call_ollama(image_b64: str) -> dict:
         level = str(parsed.get("threat_level", "safe")).lower().strip()
         if level not in ("safe", "watch", "alert"):
             level = "safe"
+        description = str(parsed.get("description", ""))[:300]
+        reason = str(parsed.get("reason", ""))[:300]
+
+        # Hard override: if the VLM description mentions a weapon-like object, force alert.
+        ALERT_KEYWORDS = (
+            "pen", "pencil", "marker", "stylus", "stick", "rod", "bat",
+            "club", "bar", "pipe", "knife", "gun", "crowbar", "screwdriver",
+            "chopstick", "ruler", "blade", "weapon",
+        )
+        desc_lower = description.lower()
+        for kw in ALERT_KEYWORDS:
+            # word-boundary-ish check: avoid matching "open" for "pen"
+            if f" {kw}" in f" {desc_lower} " or f"{kw} " in f" {desc_lower} ":
+                if level != "alert":
+                    reason = (reason + f" | auto-escalated: detected '{kw}' in description").strip(" |")
+                level = "alert"
+                break
+
         return {
-            "description": str(parsed.get("description", ""))[:300],
+            "description": description,
             "threatLevel": level,
             "suspicious": level == "alert",
-            "reason": str(parsed.get("reason", ""))[:300],
+            "reason": reason,
             "latencyMs": elapsed_ms,
         }
     except Exception as e:
