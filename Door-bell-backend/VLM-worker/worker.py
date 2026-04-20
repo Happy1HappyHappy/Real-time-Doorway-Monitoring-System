@@ -26,21 +26,21 @@ VLM_TIMEOUT_SEC = int(os.environ.get("VLM_TIMEOUT_SEC", "120"))
 OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
 
 PROMPT = (
-    "You are a residential doorbell security analyst. Follow these steps EXACTLY.\n\n"
-    "STEP 1 — Check the person's hands CAREFULLY. Are they holding ANY of the following:\n"
-    "pen, pencil, marker, stick, rod, bat, club, bar, pipe, knife, gun, crowbar, "
-    "screwdriver, tool, stylus, chopstick, ruler, or any thin elongated object?\n"
-    "If YES → threat_level MUST be \"alert\". No exceptions.\n\n"
-    "STEP 2 — If hands are empty or holding ordinary items (package, bag, phone, flowers, "
-    "umbrella, coffee cup), check for these behaviours:\n"
-    "  - running, hiding, forcing entry → \"alert\"\n"
-    "  - wearing hat/cap/hood/mask/scarf/sunglasses that partially conceal face; "
-    "loitering; peering in; pacing; turned away → \"watch\"\n"
-    "  - otherwise → \"safe\"\n\n"
-    "CRITICAL: Holding a pen or pencil = ALERT (the object could be used as a stabbing "
-    "weapon). Do NOT downgrade to watch or safe.\n\n"
-    "Describe the person in ONE short sentence covering what they are holding and doing. "
-    "Then output the threat_level.\n\n"
+    "You are a residential doorbell security analyst. Describe the person in ONE short "
+    "sentence covering what they are doing and what they are holding (if anything). "
+    "Only mention an item if you can CLEARLY SEE it in their hand — do not guess.\n\n"
+    "Threat level rules:\n"
+    "  - \"safe\": ordinary visitor, empty hands, or holding ordinary items (package, "
+    "bag, phone, flowers, coffee cup, keys, pen, pencil).\n"
+    "  - \"watch\": wearing a hat, cap, hood, mask, scarf, or sunglasses (any face or "
+    "head covering); loitering; peering in; pacing; turned away.\n"
+    "  - \"alert\": clearly carrying a real weapon (knife, gun, bat, club, crowbar, "
+    "metal pipe) OR carrying an umbrella (treated as a potential weapon here); "
+    "running; hiding; forcing entry.\n\n"
+    "IMPORTANT: A pen, pencil, or stylus is an ordinary office item and is ALWAYS "
+    '"safe", NEVER "alert". Wearing a hat or a mask is ALWAYS at least "watch".\n\n'
+    "Do NOT invent objects. If you cannot clearly see something in the hand, say "
+    '"empty hands".\n\n'
     "Respond with STRICT JSON only, no markdown, no extra text:\n"
     '{"description": "...", "threat_level": "safe|watch|alert", "reason": "..."}'
 )
@@ -74,20 +74,34 @@ def call_ollama(image_b64: str) -> dict:
         description = str(parsed.get("description", ""))[:300]
         reason = str(parsed.get("reason", ""))[:300]
 
-        # Hard override: if the VLM description mentions a weapon-like object, force alert.
-        ALERT_KEYWORDS = (
-            "pen", "pencil", "marker", "stylus", "stick", "rod", "bat",
-            "club", "bar", "pipe", "knife", "gun", "crowbar", "screwdriver",
-            "chopstick", "ruler", "blade", "weapon",
-        )
         desc_lower = description.lower()
+
+        # Hard DOWNGRADE: pen / pencil / stylus are ordinary items, force to safe.
+        SAFE_ITEMS = ("pen", "pencil", "stylus", "marker")
+        if level == "alert":
+            for kw in SAFE_ITEMS:
+                if f" {kw}" in f" {desc_lower} " or f"{kw} " in f" {desc_lower} ":
+                    level = "safe"
+                    reason = f"auto-downgraded: '{kw}' is an ordinary item"
+                    break
+
+        # Hard ESCALATE: genuine weapons + umbrella.
+        ALERT_KEYWORDS = ("knife", "gun", "pistol", "firearm", "bat", "crowbar", "weapon", "blade", "umbrella")
         for kw in ALERT_KEYWORDS:
-            # word-boundary-ish check: avoid matching "open" for "pen"
             if f" {kw}" in f" {desc_lower} " or f"{kw} " in f" {desc_lower} ":
                 if level != "alert":
                     reason = (reason + f" | auto-escalated: detected '{kw}' in description").strip(" |")
                 level = "alert"
                 break
+
+        # Hard ESCALATE to at least watch: hat or mask.
+        WATCH_KEYWORDS = ("hat", "cap", "hood", "mask", "scarf", "sunglasses", "beanie", "helmet")
+        if level == "safe":
+            for kw in WATCH_KEYWORDS:
+                if f" {kw}" in f" {desc_lower} " or f"{kw} " in f" {desc_lower} ":
+                    level = "watch"
+                    reason = (reason + f" | auto-escalated: detected '{kw}' in description").strip(" |")
+                    break
 
         return {
             "description": description,
@@ -155,12 +169,21 @@ def main():
             camera_id = req.get("cameraId")
             track_id = req.get("trackId")
             image_b64 = req.get("imageJpegB64")
+            motion_hint = req.get("motionHint")
             if not image_b64:
                 print(f"Skip {camera_id}:{track_id} — no image")
                 continue
 
-            print(f"[{camera_id}] VLM analysing trackId={track_id}...")
+            print(f"[{camera_id}] VLM analysing trackId={track_id}... motion={motion_hint}")
             result = call_ollama(image_b64)
+
+            # Force alert if motion indicates running.
+            if motion_hint == "running" and "error" not in result:
+                if result.get("threatLevel") != "alert":
+                    prev_reason = result.get("reason", "")
+                    result["reason"] = (prev_reason + " | motion: running detected").strip(" |")
+                result["threatLevel"] = "alert"
+                result["suspicious"] = True
 
             out = {
                 "type": "analysis-result",
