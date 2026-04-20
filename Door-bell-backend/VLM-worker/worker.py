@@ -33,10 +33,11 @@ PROMPT = (
     "ordinary items (package, bag, phone, flowers).\n"
     "  - \"watch\": wearing a hat, cap, hood, mask, scarf, or sunglasses that partially "
     "conceal the face; loitering; peering in; pacing; turned away; unclear intent.\n"
-    "  - \"alert\": carrying a weapon or weapon-like object (stick, bat, club, bar, pipe, "
-    "knife, gun, crowbar); running; attempting to hide; forcing entry.\n\n"
-    "Do NOT output \"alert\" just because a hat or mask is worn — that is \"watch\". "
-    "\"alert\" requires a weapon, running, hiding, or forced entry.\n\n"
+    "  - \"alert\": holding ANY elongated hand-held object such as a pencil, pen, stick, "
+    "rod, bat, club, bar, pipe, knife, gun, crowbar, screwdriver, or tool; running; "
+    "attempting to hide; forcing entry.\n\n"
+    "Any thin stick-like object in the hand (even a pencil or pen) counts as \"alert\". "
+    "Do NOT output \"alert\" just because a hat or mask is worn — that is \"watch\".\n\n"
     "Respond with STRICT JSON only, no markdown, no extra text:\n"
     '{"description": "...", "threat_level": "safe|watch|alert", "reason": "..."}'
 )

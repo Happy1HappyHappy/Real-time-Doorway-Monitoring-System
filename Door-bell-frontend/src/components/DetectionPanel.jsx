@@ -20,6 +20,8 @@ function formatPT(ts) {
   return d.toLocaleTimeString("en-US", PST_TIME_OPTS);
 }
 
+import { useState } from "react";
+
 export default function DetectionPanel({
   livePersons = {},
   history = [],
@@ -29,6 +31,7 @@ export default function DetectionPanel({
 }) {
   const totalLive = Object.values(livePersons).reduce((sum, arr) => sum + arr.length, 0);
   const totalUnique = new Set(history.map((h) => h.personId)).size;
+  const [expandedIdx, setExpandedIdx] = useState(null);
 
   return (
     <div className="detection-panel">
@@ -126,19 +129,76 @@ export default function DetectionPanel({
           {history.length === 0 ? (
             <p className="empty-state">No detections yet</p>
           ) : (
-            history.map((h, i) => (
-              <div key={i} className="history-item">
-                <span className="history-time">
-                  {formatPT(h.timestamp)} PT
-                </span>
-                <span className="history-detail">
-                  Person #{h.personId} on {h.cameraId}
-                </span>
-                <span className="history-conf">
-                  {(h.confidence * 100).toFixed(0)}%
-                </span>
-              </div>
-            ))
+            history.map((h, i) => {
+              const a = analyses[`${h.cameraId}:${h.trackId}`];
+              const level = a?.threatLevel || "safe";
+              const meta = LEVEL_META[level] || LEVEL_META.safe;
+              const open = expandedIdx === i;
+              return (
+                <div
+                  key={i}
+                  className={`history-item clickable ${open ? "expanded" : ""}`}
+                  onClick={() => setExpandedIdx(open ? null : i)}
+                >
+                  <div className="history-row">
+                    <span className="history-time">{formatPT(h.timestamp)} PT</span>
+                    <span className="history-detail">
+                      Person #{h.personId} on {h.cameraId}
+                    </span>
+                    <span className="history-conf">
+                      {(h.confidence * 100).toFixed(0)}%
+                    </span>
+                    <span className="history-caret">{open ? "▾" : "▸"}</span>
+                  </div>
+                  {open && (
+                    <div className="history-detail-panel">
+                      <div className="detail-row">
+                        <span className="detail-label">Camera</span>
+                        <span>{h.cameraId}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Person ID</span>
+                        <span>#{h.personId}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Track ID</span>
+                        <span>{h.trackId}</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Confidence</span>
+                        <span>{(h.confidence * 100).toFixed(1)}%</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Timestamp</span>
+                        <span>{formatPT(h.timestamp)} PT</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">Threat</span>
+                        <span className={`level-badge ${meta.cls}`}>{meta.label}</span>
+                      </div>
+                      {a && !a.error && a.description && (
+                        <div className="detail-row">
+                          <span className="detail-label">VLM</span>
+                          <span>{a.description}</span>
+                        </div>
+                      )}
+                      {a?.reason && level !== "safe" && (
+                        <div className="detail-row">
+                          <span className="detail-label">Reason</span>
+                          <span>{a.reason}</span>
+                        </div>
+                      )}
+                      {!a && (
+                        <div className="detail-row">
+                          <span className="detail-label">VLM</span>
+                          <span className="detail-muted">no analysis available</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
       </div>
