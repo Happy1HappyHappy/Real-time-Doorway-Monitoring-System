@@ -28,11 +28,15 @@ OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
 PROMPT = (
     "You are a residential doorbell security analyst. Describe the person in ONE short sentence "
     "covering what they appear to be DOING (e.g. knocking, waiting, looking around, carrying "
-    "package, walking past, running). Then assign a threat level:\n"
-    "  - \"safe\": ordinary visitor, clearly visible face, normal posture.\n"
-    "  - \"watch\": loitering, peering in, pacing, turned away, unclear intent.\n"
-    "  - \"alert\": face covered by mask/scarf, wearing hat/hood hiding face, running, "
-    "attempting to hide, carrying a weapon, or forcing entry.\n\n"
+    "package, walking past, running). Then assign a threat level using THESE EXACT rules:\n"
+    "  - \"safe\": ordinary visitor, clearly visible face, normal posture, empty hands or "
+    "ordinary items (package, bag, phone, flowers).\n"
+    "  - \"watch\": wearing a hat, cap, hood, mask, scarf, or sunglasses that partially "
+    "conceal the face; loitering; peering in; pacing; turned away; unclear intent.\n"
+    "  - \"alert\": carrying a weapon or weapon-like object (stick, bat, club, bar, pipe, "
+    "knife, gun, crowbar); running; attempting to hide; forcing entry.\n\n"
+    "Do NOT output \"alert\" just because a hat or mask is worn — that is \"watch\". "
+    "\"alert\" requires a weapon, running, hiding, or forced entry.\n\n"
     "Respond with STRICT JSON only, no markdown, no extra text:\n"
     '{"description": "...", "threat_level": "safe|watch|alert", "reason": "..."}'
 )
