@@ -5,7 +5,7 @@ import CameraFeed from "./components/CameraFeed";
 import DetectionPanel from "./components/DetectionPanel";
 import "./App.css";
 
-const CAMERAS = ["cam-01", "cam-02", "cam-03"];
+const CAMERAS = ["cam-01", "cam-02"];
 
 function App() {
   const [livePersons, setLivePersons] = useState({});
