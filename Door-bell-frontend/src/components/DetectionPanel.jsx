@@ -1,4 +1,11 @@
-const CAMERAS = ["cam-01", "cam-02", "cam-03"];
+const CAMERAS = ["cam-01", "cam-02"];
+const PST_TIME_OPTS = {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+  timeZone: "America/Los_Angeles",
+};
 
 export default function DetectionPanel({ livePersons = {}, history = [], analyses = {}, connected = false }) {
   const totalLive = Object.values(livePersons).reduce((sum, arr) => sum + arr.length, 0);
@@ -13,20 +20,24 @@ export default function DetectionPanel({ livePersons = {}, history = [], analyse
         </span>
       </div>
 
-      <div className="live-section">
-        <h3>Currently Visible ({totalLive})</h3>
+      <div className="stats-section">
+        <h3>Counts</h3>
         <div className="summary-stats">
-          <div className="stat-row">
-            <span>Total unique seen:</span>
-            <strong>{totalUnique}</strong>
-          </div>
           {CAMERAS.map((cam) => (
             <div key={cam} className="stat-row">
-              <span>{cam}:</span>
+              <span>{cam} (live):</span>
               <strong>{(livePersons[cam] || []).length}</strong>
             </div>
           ))}
+          <div className="stat-row stat-divider">
+            <span>Total unique seen:</span>
+            <strong>{totalUnique}</strong>
+          </div>
         </div>
+      </div>
+
+      <div className="live-section">
+        <h3>Currently Visible ({totalLive})</h3>
         {Object.entries(livePersons).length === 0 ? (
           <p className="empty-state">No one detected</p>
         ) : (
@@ -75,7 +86,7 @@ export default function DetectionPanel({ livePersons = {}, history = [], analyse
             history.map((h, i) => (
               <div key={i} className="history-item">
                 <span className="history-time">
-                  {new Date(h.timestamp).toLocaleTimeString()}
+                  {new Date(h.timestamp).toLocaleTimeString("en-US", PST_TIME_OPTS)} PT
                 </span>
                 <span className="history-detail">
                   Person #{h.personId} on {h.cameraId}

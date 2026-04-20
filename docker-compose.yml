@@ -51,22 +51,10 @@ services:
     build: ./Door-bell-backend/Python-engine
     container_name: yolo-worker-2
     env_file: .env
-    profiles: [multi-cam]
     environment:
       RTSP_INPUT: rtsp://mediamtx:8554/cam-02
       RTSP_OUTPUT: rtsp://mediamtx:8554/cam-02/annotated
       CAMERA_ID: cam-02
-    depends_on: [kafka, mediamtx]
-
-  yolo-worker-3:
-    build: ./Door-bell-backend/Python-engine
-    container_name: yolo-worker-3
-    env_file: .env
-    profiles: [multi-cam]
-    environment:
-      RTSP_INPUT: rtsp://mediamtx:8554/cam-03
-      RTSP_OUTPUT: rtsp://mediamtx:8554/cam-03/annotated
-      CAMERA_ID: cam-03
     depends_on: [kafka, mediamtx]
 
   # ── VLM Worker (Ollama client) ───────────────────────────────────────────
