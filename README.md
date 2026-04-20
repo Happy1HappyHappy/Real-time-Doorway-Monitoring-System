@@ -45,18 +45,6 @@ docker compose logs mediamtx -f
 docker compose logs yolo-worker-1 --tail=30
 ```
 
-### Start edge camera (local)
-
-```bash
-MEDIAMTX_URL=rtsp://localhost:8554/cam-01 python3 camera_producer.py
-```
-
-### Reset Qdrant (clear all person recognition data)
-
-```bash
-curl -X DELETE http://localhost:6333/collections/person-embeddings
-```
-
 ### Open frontend
 
 ```
@@ -138,18 +126,6 @@ docker compose logs yolo-worker-1 -f
 docker compose logs java-backend -f
 ```
 
-### Start edge camera (push from local to EC2)
-
-```bash
-MEDIAMTX_URL=rtsp://<EC2_PUBLIC_IP>:8554/cam-01 python3 camera_producer.py
-```
-
-### Reset Qdrant
-
-```bash
-curl -X DELETE http://<EC2_PUBLIC_IP>:6333/collections/person-embeddings
-```
-
 ### Open frontend
 
 ```
@@ -164,20 +140,6 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
 ```
 
 ---
-
-## EC2 Security Group — Required Inbound Ports
-
-| Port | Protocol | Purpose |
-|------|----------|---------|
-| 22 | TCP | SSH |
-| 80 | TCP | Frontend |
-| 8080 | TCP | Java Backend API |
-| 8554 | TCP | MediaMTX RTSP (edge camera stream) |
-| 8889 | TCP | MediaMTX WebRTC |
-| 8189 | UDP | MediaMTX WebRTC UDP |
-| 6333 | TCP | Qdrant |
-| 9092 | TCP | Kafka |
-
 ---
 
 ## Components
