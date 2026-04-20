@@ -43,6 +43,9 @@ RTSP_CONNECT_RETRIES = int(os.environ.get("RTSP_CONNECT_RETRIES", "0"))
 DEVICE = os.environ.get("DEVICE", "auto")
 EMBEDDING_FRAMES = int(os.environ.get("EMBEDDING_FRAMES", "5"))
 VLM_REANALYSIS_INTERVAL_SEC = float(os.environ.get("VLM_REANALYSIS_INTERVAL_SEC", "5.0"))
+# Motion detection: pixel-normalized speed threshold (fraction of frame width per second).
+MOTION_RUNNING_THRESHOLD = float(os.environ.get("MOTION_RUNNING_THRESHOLD", "0.35"))
+MOTION_WINDOW_SEC = float(os.environ.get("MOTION_WINDOW_SEC", "0.8"))
 
 
 def _crop_bbox(frame: np.ndarray, bbox_xywhn: list) -> np.ndarray:
@@ -109,6 +112,7 @@ class InferenceWorker:
         self._active_ids = set()
         self._pending: dict = {}  # tid -> {embeddings, bbox, confidence}
         self._last_vlm_ts: dict = {}  # tid -> last VLM request timestamp (seconds)
+        self._motion_history: dict = {}  # tid -> list of (ts, center_x, center_y)
         self._ffmpeg_out = None
         self._frame_size = None
 
@@ -217,6 +221,26 @@ class InferenceWorker:
                         "confidence": round(confs[i], 3),
                     }
 
+                # Update motion history (center in normalized coords)
+                cx, cy = xywh[i][0], xywh[i][1]
+                hist = self._motion_history.setdefault(tid, [])
+                hist.append((now_ts, cx, cy))
+                # Keep only samples within the motion window
+                cutoff = now_ts - MOTION_WINDOW_SEC
+                self._motion_history[tid] = [s for s in hist if s[0] >= cutoff]
+
+                # Compute speed (normalized distance per second) over the window
+                motion_hint = None
+                samples = self._motion_history[tid]
+                if len(samples) >= 2:
+                    t0, x0, y0 = samples[0]
+                    t1, x1, y1 = samples[-1]
+                    dt = max(t1 - t0, 1e-3)
+                    dist = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+                    speed = dist / dt  # fraction of frame per second
+                    if speed >= MOTION_RUNNING_THRESHOLD:
+                        motion_hint = "running"
+
                 # Queue a VLM analysis request for new tracks, or re-analyse
                 # tracks still in frame every VLM_REANALYSIS_INTERVAL_SEC.
                 last_ts = self._last_vlm_ts.get(tid, 0.0)
@@ -228,8 +252,11 @@ class InferenceWorker:
                             "trackId": tid,
                             "bbox": [round(v, 3) for v in xywh[i]],
                             "imageJpegB64": img_b64,
+                            "motionHint": motion_hint,
                         })
                         self._last_vlm_ts[tid] = now_ts
+                        if motion_hint:
+                            print(f"  [{CAMERA_ID}] MOTION trackId={tid} speed>{MOTION_RUNNING_THRESHOLD}")
 
             # Collect one embedding per frame for all pending tracks
             for i, tid in enumerate(id_list):
@@ -261,6 +288,7 @@ class InferenceWorker:
             # Flush tracks that left before collecting enough frames
             for tid in left_ids:
                 self._last_vlm_ts.pop(tid, None)
+                self._motion_history.pop(tid, None)
                 if tid in self._pending:
                     pending = self._pending.pop(tid)
                     if pending["embeddings"]:
@@ -287,6 +315,7 @@ class InferenceWorker:
                     })
             self._pending.clear()
             self._last_vlm_ts.clear()
+            self._motion_history.clear()
 
         if detections or t_reid_total > 0:
             print(f"  [{CAMERA_ID}] TIMING | yolo={t_yolo:.0f}ms | reid={t_reid_total:.0f}ms | total_python={t_yolo + t_reid_total:.0f}ms")
