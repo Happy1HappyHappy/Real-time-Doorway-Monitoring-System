@@ -228,9 +228,80 @@ body {
   border-left: 3px solid #3fb950;
 }
 
-.person-card.suspicious {
-  border-left-color: #f85149;
-  background: #2a1616;
+.person-card.level-safe  { border-left-color: #3fb950; }
+.person-card.level-watch { border-left-color: #d29922; background: #2a2416; }
+.person-card.level-alert { border-left-color: #f85149; background: #2a1616; }
+
+.person-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.level-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.level-badge.level-safe  { background: #0d2818; color: #3fb950; }
+.level-badge.level-watch { background: #2a2416; color: #d29922; }
+.level-badge.level-alert { background: #2a1616; color: #f85149; }
+
+/* ── Timeline Section ─────────────────────────────────────── */
+.timeline-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid #30363d;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.timeline-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8b949e;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  border-left: 3px solid #30363d;
+  background: #1c2128;
+}
+
+.timeline-item.level-safe  { border-left-color: #3fb950; }
+.timeline-item.level-watch { border-left-color: #d29922; }
+.timeline-item.level-alert { border-left-color: #f85149; background: #2a1616; }
+
+.timeline-time {
+  font-family: monospace;
+  color: #8b949e;
+  font-size: 11px;
+}
+
+.timeline-detail {
+  color: #c9d1d9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .person-id {

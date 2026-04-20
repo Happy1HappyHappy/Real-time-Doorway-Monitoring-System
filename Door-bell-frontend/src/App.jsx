@@ -12,6 +12,7 @@ function App() {
   const [positions, setPositions] = useState({});
   const [history, setHistory] = useState([]);
   const [analyses, setAnalyses] = useState({});
+  const [timeline, setTimeline] = useState([]);
   const [connected, setConnected] = useState(false);
   const clientRef = useRef(null);
   const livePersonsRef = useRef({});
@@ -31,17 +32,28 @@ function App() {
 
           if (event.type === "analysis") {
             const key = `${event.cameraId}:${event.trackId}`;
-            setAnalyses((prev) => ({
-              ...prev,
-              [key]: {
-                description: event.description,
-                suspicious: event.suspicious,
-                reason: event.reason,
-                latencyMs: event.latencyMs,
-                error: event.error,
-                timestamp: event.timestamp,
-              },
-            }));
+            const entry = {
+              description: event.description,
+              threatLevel: event.threatLevel || (event.suspicious ? "alert" : "safe"),
+              suspicious: event.suspicious,
+              reason: event.reason,
+              latencyMs: event.latencyMs,
+              error: event.error,
+              timestamp: event.timestamp,
+            };
+            setAnalyses((prev) => ({ ...prev, [key]: entry }));
+            if (!entry.error) {
+              setTimeline((prev) =>
+                [{
+                  cameraId: event.cameraId,
+                  trackId: event.trackId,
+                  threatLevel: entry.threatLevel,
+                  description: entry.description,
+                  reason: entry.reason,
+                  timestamp: entry.timestamp,
+                }, ...prev].slice(0, 50)
+              );
+            }
             return;
           }
 
@@ -143,6 +155,7 @@ function App() {
           livePersons={livePersons}
           history={history}
           analyses={analyses}
+          timeline={timeline}
           connected={connected}
         />
       </div>
