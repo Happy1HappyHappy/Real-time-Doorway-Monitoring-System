@@ -42,6 +42,7 @@ OUTPUT_FPS = int(os.environ.get("OUTPUT_FPS", "15"))
 RTSP_CONNECT_RETRIES = int(os.environ.get("RTSP_CONNECT_RETRIES", "0"))
 DEVICE = os.environ.get("DEVICE", "auto")
 EMBEDDING_FRAMES = int(os.environ.get("EMBEDDING_FRAMES", "5"))
+VLM_REANALYSIS_INTERVAL_SEC = float(os.environ.get("VLM_REANALYSIS_INTERVAL_SEC", "5.0"))
 
 
 def _crop_bbox(frame: np.ndarray, bbox_xywhn: list) -> np.ndarray:
@@ -107,6 +108,7 @@ class InferenceWorker:
 
         self._active_ids = set()
         self._pending: dict = {}  # tid -> {embeddings, bbox, confidence}
+        self._last_vlm_ts: dict = {}  # tid -> last VLM request timestamp (seconds)
         self._ffmpeg_out = None
         self._frame_size = None
 
@@ -206,6 +208,7 @@ class InferenceWorker:
             id_list = boxes.id.int().tolist()
 
             # Initialize pending buffer for newly appeared tracks
+            now_ts = time.time()
             for i, tid in enumerate(id_list):
                 if tid in newly_seen:
                     self._pending[tid] = {
@@ -213,7 +216,11 @@ class InferenceWorker:
                         "bbox": [round(v, 3) for v in xywh[i]],
                         "confidence": round(confs[i], 3),
                     }
-                    # Crop this new person and queue a VLM analysis request
+
+                # Queue a VLM analysis request for new tracks, or re-analyse
+                # tracks still in frame every VLM_REANALYSIS_INTERVAL_SEC.
+                last_ts = self._last_vlm_ts.get(tid, 0.0)
+                if tid in newly_seen or (now_ts - last_ts) >= VLM_REANALYSIS_INTERVAL_SEC:
                     crop = _crop_bbox(frame, xywh[i])
                     img_b64 = _encode_crop_b64(crop)
                     if img_b64:
@@ -222,6 +229,7 @@ class InferenceWorker:
                             "bbox": [round(v, 3) for v in xywh[i]],
                             "imageJpegB64": img_b64,
                         })
+                        self._last_vlm_ts[tid] = now_ts
 
             # Collect one embedding per frame for all pending tracks
             for i, tid in enumerate(id_list):
@@ -252,6 +260,7 @@ class InferenceWorker:
 
             # Flush tracks that left before collecting enough frames
             for tid in left_ids:
+                self._last_vlm_ts.pop(tid, None)
                 if tid in self._pending:
                     pending = self._pending.pop(tid)
                     if pending["embeddings"]:
@@ -277,6 +286,7 @@ class InferenceWorker:
                         "confidence": pending["confidence"],
                     })
             self._pending.clear()
+            self._last_vlm_ts.clear()
 
         if detections or t_reid_total > 0:
             print(f"  [{CAMERA_ID}] TIMING | yolo={t_yolo:.0f}ms | reid={t_reid_total:.0f}ms | total_python={t_yolo + t_reid_total:.0f}ms")
