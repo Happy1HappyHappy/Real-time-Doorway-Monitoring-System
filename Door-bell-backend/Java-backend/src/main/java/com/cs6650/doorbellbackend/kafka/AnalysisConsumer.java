@@ -32,6 +32,7 @@ public class AnalysisConsumer {
             wsPayload.put("cameraId", cameraId);
             wsPayload.put("trackId", trackId);
             wsPayload.put("description", node.path("description").asText(""));
+            wsPayload.put("threatLevel", node.path("threatLevel").asText("safe"));
             wsPayload.put("suspicious", node.path("suspicious").asBoolean(false));
             wsPayload.put("reason", node.path("reason").asText(""));
             wsPayload.put("latencyMs", node.path("latencyMs").asInt(0));

@@ -26,11 +26,15 @@ VLM_TIMEOUT_SEC = int(os.environ.get("VLM_TIMEOUT_SEC", "120"))
 OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
 
 PROMPT = (
-    "You are a security camera analyst. Describe the person in the image in one short sentence "
-    "(clothing, carried items, notable features). Then assess if their behaviour or appearance "
-    "looks suspicious for a residential doorbell context.\n\n"
+    "You are a residential doorbell security analyst. Describe the person in ONE short sentence "
+    "covering what they appear to be DOING (e.g. knocking, waiting, looking around, carrying "
+    "package, walking past, running). Then assign a threat level:\n"
+    "  - \"safe\": ordinary visitor, clearly visible face, normal posture.\n"
+    "  - \"watch\": loitering, peering in, pacing, turned away, unclear intent.\n"
+    "  - \"alert\": face covered by mask/scarf, wearing hat/hood hiding face, running, "
+    "attempting to hide, carrying a weapon, or forcing entry.\n\n"
     "Respond with STRICT JSON only, no markdown, no extra text:\n"
-    '{"description": "...", "suspicious": true|false, "reason": "..."}'
+    '{"description": "...", "threat_level": "safe|watch|alert", "reason": "..."}'
 )
 
 
@@ -56,9 +60,13 @@ def call_ollama(image_b64: str) -> dict:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
             return {"error": f"invalid JSON from VLM: {raw[:200]}", "latencyMs": elapsed_ms}
+        level = str(parsed.get("threat_level", "safe")).lower().strip()
+        if level not in ("safe", "watch", "alert"):
+            level = "safe"
         return {
             "description": str(parsed.get("description", ""))[:300],
-            "suspicious": bool(parsed.get("suspicious", False)),
+            "threatLevel": level,
+            "suspicious": level == "alert",
             "reason": str(parsed.get("reason", ""))[:300],
             "latencyMs": elapsed_ms,
         }
@@ -145,8 +153,9 @@ def main():
             if "error" in result:
                 print(f"[{camera_id}] VLM FAIL track={track_id} | {result['error']} | {result['latencyMs']}ms")
             else:
-                flag = "⚠ SUSPICIOUS" if result.get("suspicious") else "ok"
-                print(f"[{camera_id}] VLM DONE track={track_id} | {flag} | {result['latencyMs']}ms | {result.get('description','')[:80]}")
+                level = result.get("threatLevel", "safe")
+                badge = {"alert": "🔴 ALERT", "watch": "🟡 WATCH", "safe": "🟢 SAFE"}.get(level, level)
+                print(f"[{camera_id}] VLM DONE track={track_id} | {badge} | {result['latencyMs']}ms | {result.get('description','')[:80]}")
     except KeyboardInterrupt:
         print("Shutting down VLM worker...")
     finally:
