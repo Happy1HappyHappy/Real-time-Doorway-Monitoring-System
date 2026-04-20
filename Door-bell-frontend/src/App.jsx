@@ -11,6 +11,7 @@ function App() {
   const [livePersons, setLivePersons] = useState({});
   const [positions, setPositions] = useState({});
   const [history, setHistory] = useState([]);
+  const [analyses, setAnalyses] = useState({});
   const [connected, setConnected] = useState(false);
   const clientRef = useRef(null);
   const livePersonsRef = useRef({});
@@ -27,6 +28,22 @@ function App() {
         setConnected(true);
         client.subscribe("/topic/detections", (message) => {
           const event = JSON.parse(message.body);
+
+          if (event.type === "analysis") {
+            const key = `${event.cameraId}:${event.trackId}`;
+            setAnalyses((prev) => ({
+              ...prev,
+              [key]: {
+                description: event.description,
+                suspicious: event.suspicious,
+                reason: event.reason,
+                latencyMs: event.latencyMs,
+                error: event.error,
+                timestamp: event.timestamp,
+              },
+            }));
+            return;
+          }
 
           if (event.type === "position") {
             setPositions((prev) => ({ ...prev, [event.cameraId]: event.tracks }));
@@ -125,6 +142,7 @@ function App() {
         <DetectionPanel
           livePersons={livePersons}
           history={history}
+          analyses={analyses}
           connected={connected}
         />
       </div>
