@@ -75,10 +75,12 @@ public class DetectionService {
                     if (person != null) {
                         person.setLastSeenAt(timestamp);
                         personRepository.save(person);
+                        qdrantService.upsert(personId, embedding, personId); // Update embedding with latest
                         nickname = person.getNickname();
+
                     }
                     log.info("[RE-ID] [{}] MATCH person #{}", cameraId, personId);
-                } else {
+                } else 
                     // New person — create and store embedding
                     Person person = new Person(cameraId, timestamp);
                     person = personRepository.save(person);
