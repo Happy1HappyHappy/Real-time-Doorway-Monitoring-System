@@ -75,7 +75,7 @@ public class DetectionService {
                     if (person != null) {
                         person.setLastSeenAt(timestamp);
                         personRepository.save(person);
-                        qdrantService.upsert(personId, embedding, personId); // Update embedding with latest
+                        // qdrantService.upsert(personId, embedding, personId); // Update embedding with latest
                         nickname = person.getNickname();
 
                     }
