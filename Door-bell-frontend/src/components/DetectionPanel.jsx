@@ -22,16 +22,43 @@ function formatPT(ts) {
 
 import { useState } from "react";
 
+function personLabel(personId, nicknames) {
+  const nn = nicknames?.[personId];
+  return nn ? nn : `Person #${personId}`;
+}
+
 export default function DetectionPanel({
   livePersons = {},
   history = [],
   analyses = {},
   timeline = [],
   connected = false,
+  nicknames = {},
+  onSaveNickname,
 }) {
   const totalLive = Object.values(livePersons).reduce((sum, arr) => sum + arr.length, 0);
   const totalUnique = new Set(history.map((h) => h.personId)).size;
   const [expandedIdx, setExpandedIdx] = useState(null);
+  const [editingPersonId, setEditingPersonId] = useState(null);
+  const [draftNick, setDraftNick] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  function startEdit(personId) {
+    setEditingPersonId(personId);
+    setDraftNick(nicknames[personId] || "");
+  }
+  async function commitEdit(personId) {
+    if (!onSaveNickname) return;
+    setSaving(true);
+    try {
+      await onSaveNickname(personId, draftNick.trim());
+      setEditingPersonId(null);
+    } catch (e) {
+      console.warn("nickname save failed", e);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="detection-panel">
@@ -73,7 +100,33 @@ export default function DetectionPanel({
                 return (
                   <div key={p.trackId} className={`person-card ${a ? meta.cls : ""}`}>
                     <div className="person-card-header">
-                      <span className="person-id">Person #{p.personId}</span>
+                      {editingPersonId === p.personId ? (
+                        <span className="person-id nickname-edit">
+                          <input
+                            autoFocus
+                            type="text"
+                            value={draftNick}
+                            placeholder={`Person #${p.personId}`}
+                            onChange={(e) => setDraftNick(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") commitEdit(p.personId);
+                              if (e.key === "Escape") setEditingPersonId(null);
+                            }}
+                            disabled={saving}
+                          />
+                          <button onClick={() => commitEdit(p.personId)} disabled={saving}>✓</button>
+                          <button onClick={() => setEditingPersonId(null)} disabled={saving}>✕</button>
+                        </span>
+                      ) : (
+                        <span className="person-id">
+                          {personLabel(p.personId, nicknames)}
+                          <button
+                            className="nickname-edit-btn"
+                            title="Set nickname"
+                            onClick={() => startEdit(p.personId)}
+                          >✎</button>
+                        </span>
+                      )}
                       {a && !a.error && <span className={`level-badge ${meta.cls}`}>{meta.label}</span>}
                     </div>
                     <span className="person-meta">
@@ -143,7 +196,7 @@ export default function DetectionPanel({
                   <div className="history-row">
                     <span className="history-time">{formatPT(h.timestamp)} PT</span>
                     <span className="history-detail">
-                      Person #{h.personId} on {h.cameraId}
+                      {personLabel(h.personId, nicknames)} on {h.cameraId}
                     </span>
                     <span className="history-conf">
                       {(h.confidence * 100).toFixed(0)}%
@@ -157,8 +210,8 @@ export default function DetectionPanel({
                         <span>{h.cameraId}</span>
                       </div>
                       <div className="detail-row">
-                        <span className="detail-label">Person ID</span>
-                        <span>#{h.personId}</span>
+                        <span className="detail-label">Person</span>
+                        <span>{personLabel(h.personId, nicknames)} (#{h.personId})</span>
                       </div>
                       <div className="detail-row">
                         <span className="detail-label">Track ID</span>

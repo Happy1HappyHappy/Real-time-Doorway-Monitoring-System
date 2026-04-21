@@ -14,8 +14,38 @@ function App() {
   const [analyses, setAnalyses] = useState({});
   const [timeline, setTimeline] = useState([]);
   const [connected, setConnected] = useState(false);
+  const [nicknames, setNicknames] = useState({});
   const clientRef = useRef(null);
   const livePersonsRef = useRef({});
+
+  useEffect(() => {
+    fetch("/api/persons")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((persons) => {
+        const map = {};
+        for (const p of persons) {
+          if (p.nickname) map[p.id] = p.nickname;
+        }
+        setNicknames(map);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function saveNickname(personId, nickname) {
+    const res = await fetch(`/api/persons/${personId}/nickname`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nickname }),
+    });
+    if (!res.ok) throw new Error(`save failed: ${res.status}`);
+    const updated = await res.json();
+    setNicknames((prev) => {
+      const next = { ...prev };
+      if (updated.nickname) next[personId] = updated.nickname;
+      else delete next[personId];
+      return next;
+    });
+  }
 
   useEffect(() => {
     livePersonsRef.current = livePersons;
@@ -88,7 +118,10 @@ function App() {
             return;
           }
 
-          const { personId, cameraId, trackId, confidence, timestamp, bbox } = event;
+          const { personId, nickname, cameraId, trackId, confidence, timestamp, bbox } = event;
+          if (nickname) {
+            setNicknames((prev) => (prev[personId] === nickname ? prev : { ...prev, [personId]: nickname }));
+          }
           setLivePersons((prev) => {
             const camPersons = [...(prev[cameraId] || [])];
             const exists = camPersons.findIndex((p) => p.trackId === trackId);
@@ -147,6 +180,7 @@ function App() {
               key={cam}
               cameraId={cam}
               positions={positions[cam] || []}
+              nicknames={nicknames}
             />
           ))}
         </div>
@@ -157,6 +191,8 @@ function App() {
           analyses={analyses}
           timeline={timeline}
           connected={connected}
+          nicknames={nicknames}
+          onSaveNickname={saveNickname}
         />
       </div>
     </div>
