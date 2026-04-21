@@ -80,7 +80,7 @@ public class DetectionService {
 
                     }
                     log.info("[RE-ID] [{}] MATCH person #{}", cameraId, personId);
-                } else 
+                } else {
                     // New person — create and store embedding
                     Person person = new Person(cameraId, timestamp);
                     person = personRepository.save(person);
