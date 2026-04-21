@@ -24,6 +24,9 @@ public class Person {
     @Column(name = "last_seen_at")
     private LocalDateTime lastSeenAt;
 
+    @Column(name = "nickname")
+    private String nickname;
+
     public Person(String cameraId, LocalDateTime timestamp) {
         this.firstSeenCamera = cameraId;
         this.firstSeenAt = timestamp;

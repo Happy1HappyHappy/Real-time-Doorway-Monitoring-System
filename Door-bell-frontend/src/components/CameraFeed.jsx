@@ -5,7 +5,7 @@ function personColor(personId) {
   return `hsl(${hue}, 80%, 55%)`;
 }
 
-export default function CameraFeed({ cameraId, positions = [] }) {
+export default function CameraFeed({ cameraId, positions = [], nicknames = {} }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const pcRef = useRef(null);
@@ -102,7 +102,7 @@ export default function CameraFeed({ cameraId, positions = [] }) {
       const x1 = (cx - bw / 2) * canvas.width;
       const y1 = (cy - bh / 2) * canvas.height;
 
-      const label = `#${personId}`;
+      const label = nicknames[personId] || `#${personId}`;
       const color = personColor(personId);
 
       ctx.font = "bold 18px sans-serif";
@@ -118,7 +118,7 @@ export default function CameraFeed({ cameraId, positions = [] }) {
       ctx.fillStyle = "#fff";
       ctx.fillText(label, lx + 8, ly + 20);
     });
-  }, [positions]);
+  }, [positions, nicknames]);
 
   return (
     <div className="camera-feed">

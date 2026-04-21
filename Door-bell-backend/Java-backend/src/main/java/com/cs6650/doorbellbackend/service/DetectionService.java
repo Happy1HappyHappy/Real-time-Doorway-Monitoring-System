@@ -60,6 +60,7 @@ public class DetectionService {
             List<Double> embedding = detection.getEmbedding();
 
             Long personId;
+            String nickname = null;
             if (embedding != null && !embedding.isEmpty()) {
                 // Search Qdrant for matching person
                 long qdrantStart = System.currentTimeMillis();
@@ -74,6 +75,7 @@ public class DetectionService {
                     if (person != null) {
                         person.setLastSeenAt(timestamp);
                         personRepository.save(person);
+                        nickname = person.getNickname();
                     }
                     log.info("[RE-ID] [{}] MATCH person #{}", cameraId, personId);
                 } else {
@@ -122,6 +124,7 @@ public class DetectionService {
             Map<String, Object> wsPayload = new HashMap<>();
             wsPayload.put("type", "detection");
             wsPayload.put("personId", personId);
+            wsPayload.put("nickname", nickname);
             wsPayload.put("cameraId", cameraId);
             wsPayload.put("trackId", detection.getTrackId());
             wsPayload.put("confidence", detection.getConfidence());
