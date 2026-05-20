@@ -1,3 +1,6 @@
+# Authors: Claire Liu, Yu-Jing Wei
+# Description: Multi-stage Dockerfile that builds the Vite React frontend and serves
+# the static assets from an nginx runtime image.
 # Stage 1: Build React app
 FROM node:20-alpine AS builder
 WORKDIR /app

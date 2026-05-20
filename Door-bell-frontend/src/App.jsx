@@ -1,3 +1,9 @@
+/*
+ * Authors: Claire Liu, Yu-Jing Wei
+ * Description: Top-level Door-bell dashboard component. Connects to the Java backend via
+ * STOMP/WebSocket to receive detection, position, left, and analysis events, renders camera
+ * feeds plus the detection panel, and supports editing person nicknames via REST.
+ */
 import { useEffect, useRef, useState } from "react";
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";

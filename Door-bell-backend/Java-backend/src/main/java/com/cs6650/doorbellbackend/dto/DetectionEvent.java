@@ -1,3 +1,8 @@
+/**
+ * Authors: Claire Liu, Yu-Jing Wei
+ * Description: DTO for Kafka detection events (detection, left, position), including nested
+ * PersonDetection and TrackPosition types used to deserialize messages from the Python worker.
+ */
 package com.cs6650.doorbellbackend.dto;
 
 import lombok.Data;

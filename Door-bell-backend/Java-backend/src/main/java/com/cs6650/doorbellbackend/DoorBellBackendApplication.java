@@ -1,3 +1,7 @@
+/**
+ * Authors: Claire Liu, Yu-Jing Wei
+ * Description: Spring Boot entry point for the Door-bell backend application.
+ */
 package com.cs6650.doorbellbackend;
 
 import org.springframework.boot.SpringApplication;

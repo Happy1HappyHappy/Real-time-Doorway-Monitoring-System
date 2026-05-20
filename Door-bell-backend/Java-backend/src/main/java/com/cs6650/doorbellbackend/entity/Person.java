@@ -1,3 +1,8 @@
+/**
+ * Authors: Claire Liu, Yu-Jing Wei
+ * Description: JPA entity representing a uniquely identified person with first/last seen
+ * timestamps, originating camera, and an optional user-assigned nickname.
+ */
 package com.cs6650.doorbellbackend.entity;
 
 import jakarta.persistence.*;

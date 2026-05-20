@@ -1,6 +1,7 @@
 """
-VLM Worker - consumes analysis-requests (person crops from yolo-worker),
-calls Ollama for description + anomaly assessment, publishes analysis-results.
+Authors: Claire Liu, Yu-Jing Wei
+Description: VLM Worker that consumes analysis-requests (person crops from yolo-worker),
+calls Ollama for description and threat-level assessment, and publishes analysis-results.
 
 Env vars:
   KAFKA_BOOTSTRAP_SERVERS       - default: "kafka:29092"
@@ -15,7 +16,7 @@ import os
 import json
 import time
 import requests
-from confluent_kafka import Consumer, Producer
+from confluent_kafka import Consumer, Producer, KafkaException
 
 KAFKA_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 TOPIC_REQUESTS = os.environ.get("KAFKA_TOPIC_ANALYSIS_REQUESTS", "doorbell-analysis-requests")
@@ -115,6 +116,15 @@ def call_ollama(image_b64: str) -> dict:
         return {"error": f"{type(e).__name__}: {e}", "latencyMs": elapsed_ms}
 
 
+def _delivery_report(err, msg):
+    """Log Kafka delivery failures so analysis results are never silently dropped."""
+    if err is not None:
+        print(
+            f"KAFKA DELIVERY FAILED topic={msg.topic()} key={msg.key()} "
+            f"err={err.code()} {err.str()}"
+        )
+
+
 def warmup_ollama():
     """Preload the model into memory so the first real request isn't slow."""
     try:
@@ -193,12 +203,21 @@ def main():
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 **result,
             }
-            producer.produce(
-                TOPIC_RESULTS,
-                key=f"{camera_id}:{track_id}",
-                value=json.dumps(out),
-            )
-            producer.poll(0)
+            try:
+                producer.produce(
+                    TOPIC_RESULTS,
+                    key=f"{camera_id}:{track_id}",
+                    value=json.dumps(out),
+                    callback=_delivery_report,
+                )
+                producer.poll(0)
+            except BufferError:
+                # Local queue full — drain and drop this result rather than block
+                # the consumer; we'd rather lose one analysis than stop processing.
+                print(f"KAFKA BUFFER FULL on {TOPIC_RESULTS}, dropping result for {camera_id}:{track_id}")
+                producer.poll(0.1)
+            except KafkaException as e:
+                print(f"KAFKA PRODUCE EXCEPTION on {TOPIC_RESULTS}: {e}")
             if "error" in result:
                 print(f"[{camera_id}] VLM FAIL track={track_id} | {result['error']} | {result['latencyMs']}ms")
             else:

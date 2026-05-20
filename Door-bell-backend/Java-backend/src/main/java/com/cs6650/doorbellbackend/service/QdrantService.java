@@ -1,3 +1,8 @@
+/**
+ * Authors: Claire Liu, Yu-Jing Wei
+ * Description: Service wrapping the Qdrant REST API to manage the person-embeddings collection,
+ * search for similar 512-dim vectors above a similarity threshold, and upsert new embeddings.
+ */
 package com.cs6650.doorbellbackend.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -8,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
 import java.util.List;
@@ -38,14 +44,26 @@ public class QdrantService {
                     .retrieve()
                     .body(String.class);
             log.info("Qdrant collection '{}' already exists", collectionName);
+            return;
+        } catch (HttpClientErrorException.NotFound e) {
+            // Only create when Qdrant explicitly says the collection is missing.
         } catch (Exception e) {
-            log.info("Creating Qdrant collection '{}'", collectionName);
-            Map<String, Object> body = Map.of(
-                    "vectors", Map.of(
-                            "size", VECTOR_SIZE,
-                            "distance", "Cosine"
-                    )
-            );
+            // Any other failure (Qdrant down, network, auth) — fail fast rather
+            // than mask as "collection missing" and try to recreate over a half-broken
+            // backend, which would emit confusing PUT errors later on every request.
+            log.error("Qdrant health check failed at startup (host unreachable or unexpected error): {}",
+                    e.getMessage());
+            throw new IllegalStateException("Qdrant is not reachable at startup", e);
+        }
+
+        log.info("Creating Qdrant collection '{}'", collectionName);
+        Map<String, Object> body = Map.of(
+                "vectors", Map.of(
+                        "size", VECTOR_SIZE,
+                        "distance", "Cosine"
+                )
+        );
+        try {
             qdrantRestClient.put()
                     .uri("/collections/{name}", collectionName)
                     .contentType(MediaType.APPLICATION_JSON)
@@ -53,6 +71,9 @@ public class QdrantService {
                     .retrieve()
                     .body(String.class);
             log.info("Qdrant collection '{}' created", collectionName);
+        } catch (Exception e) {
+            log.error("Failed to create Qdrant collection '{}': {}", collectionName, e.getMessage());
+            throw new IllegalStateException("Failed to create Qdrant collection at startup", e);
         }
     }
 

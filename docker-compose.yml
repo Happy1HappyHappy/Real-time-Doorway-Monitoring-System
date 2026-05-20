@@ -1,3 +1,7 @@
+# Authors: Claire Liu, Yu-Jing Wei
+# Description: Docker Compose stack for the Door-bell system, wiring together Kafka,
+# PostgreSQL, Qdrant, MediaMTX, the Java backend, Python YOLO workers, the VLM worker,
+# and the React frontend.
 services:
 
   # ── Message Broker ───────────────────────────────────────────────────────
