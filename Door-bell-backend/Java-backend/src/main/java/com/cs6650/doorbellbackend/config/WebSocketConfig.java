@@ -1,3 +1,8 @@
+/**
+ * Authors: Claire Liu, Yu-Jing Wei
+ * Description: STOMP-over-WebSocket configuration that enables the /topic broker and
+ * registers the /ws endpoint with SockJS fallback for frontend clients.
+ */
 package com.cs6650.doorbellbackend.config;
 
 import org.springframework.context.annotation.Configuration;

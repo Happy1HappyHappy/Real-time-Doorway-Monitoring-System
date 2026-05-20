@@ -1,6 +1,7 @@
 """
-YOLO Inference Worker - pulls RTSP stream, runs YOLO + BoTSORT,
-pushes annotated stream back to MediaMTX, sends detection JSON to Kafka.
+Authors: Claire Liu, Yu-Jing Wei
+Description: YOLO Inference Worker that pulls an RTSP stream, runs YOLO + BoTSORT tracking,
+pushes the annotated stream back to MediaMTX, and sends detection/position/analysis-request events to Kafka.
 
 Env vars:
   RTSP_INPUT               - input RTSP URL from MediaMTX (e.g. rtsp://mediamtx:8554/cam-01)
@@ -23,7 +24,7 @@ import subprocess
 import numpy as np
 import cv2
 from datetime import datetime
-from confluent_kafka import Producer, KafkaError
+from confluent_kafka import Producer, KafkaError, KafkaException
 from ultralytics import YOLO
 from reid_extractor import extract_embedding
 
@@ -97,6 +98,17 @@ def _resolve_device() -> str:
     return "cpu"
 
 
+def _delivery_report(err, msg):
+    """Callback invoked once per produced message; logs failures loudly."""
+    if err is not None:
+        # Note: this runs inside librdkafka's background thread on poll().
+        # Keep it side-effect-light — just log so we never silently drop events.
+        print(
+            f"  KAFKA DELIVERY FAILED topic={msg.topic()} "
+            f"key={msg.key()} err={err.code()} {err.str()}"
+        )
+
+
 class InferenceWorker:
     def __init__(self):
         self.device = _resolve_device()
@@ -107,7 +119,12 @@ class InferenceWorker:
             "bootstrap.servers": KAFKA_SERVERS,
             "acks": "1",
             "compression.type": "lz4",
+            # Bound the producer queue so we fail loudly under backpressure
+            # instead of growing memory without limit when Kafka is slow/down.
+            "queue.buffering.max.messages": 10000,
+            "queue.buffering.max.kbytes": 1048576,  # 1 GiB
         })
+        self._produce_failures = 0
 
         self._active_ids = set()
         self._pending: dict = {}  # tid -> {embeddings, bbox, confidence}
@@ -117,6 +134,29 @@ class InferenceWorker:
         self._frame_size = None
 
         print(f"Worker ready | input={RTSP_INPUT} output={RTSP_OUTPUT}")
+
+    def _safe_produce(self, topic, key, value):
+        """Produce with backpressure + error handling. Returns True on success."""
+        try:
+            self.producer.produce(
+                topic, key=key, value=value, callback=_delivery_report
+            )
+            self.producer.poll(0)
+            return True
+        except BufferError:
+            # Local queue is full → broker is slow or unreachable. Drain once,
+            # then drop this one event rather than blocking the inference loop.
+            self._produce_failures += 1
+            print(
+                f"  [{CAMERA_ID}] KAFKA BUFFER FULL topic={topic} "
+                f"failures={self._produce_failures}, draining..."
+            )
+            self.producer.poll(0.1)
+            return False
+        except KafkaException as e:
+            self._produce_failures += 1
+            print(f"  [{CAMERA_ID}] KAFKA PRODUCE EXCEPTION topic={topic} err={e}")
+            return False
 
     def _open_rtsp_input(self):
         """Connect to the RTSP input, waiting forever by default."""
@@ -416,13 +456,8 @@ class InferenceWorker:
                         "kafkaProducedAt": int(time.time() * 1000),
                         "detections": detections,
                     }
-                    self.producer.produce(
-                        TOPIC_DETECTIONS,
-                        key=CAMERA_ID,
-                        value=json.dumps(event),
-                    )
-                    self.producer.poll(0)
-                    kafka_sent = len(detections)
+                    if self._safe_produce(TOPIC_DETECTIONS, CAMERA_ID, json.dumps(event)):
+                        kafka_sent = len(detections)
 
                     for d in detections:
                         print(f"  [{CAMERA_ID}] KAFKA >>> NEW person trackId={d['trackId']} conf={d['confidence']} embedding_dim={len(d['embedding'])}")
@@ -435,12 +470,7 @@ class InferenceWorker:
                         "timestamp": datetime.now().isoformat(),
                         "leftTrackIds": list(left_ids),
                     }
-                    self.producer.produce(
-                        TOPIC_DETECTIONS,
-                        key=CAMERA_ID,
-                        value=json.dumps(left_event),
-                    )
-                    self.producer.poll(0)
+                    self._safe_produce(TOPIC_DETECTIONS, CAMERA_ID, json.dumps(left_event))
                     print(f"  [{CAMERA_ID}] KAFKA >>> LEFT trackIds={list(left_ids)}")
 
                 # Send analysis requests (one per newly-seen track)
@@ -453,12 +483,11 @@ class InferenceWorker:
                         "bbox": req["bbox"],
                         "imageJpegB64": req["imageJpegB64"],
                     }
-                    self.producer.produce(
+                    self._safe_produce(
                         TOPIC_ANALYSIS_REQUESTS,
-                        key=f"{CAMERA_ID}:{req['trackId']}",
-                        value=json.dumps(analysis_event),
+                        f"{CAMERA_ID}:{req['trackId']}",
+                        json.dumps(analysis_event),
                     )
-                    self.producer.poll(0)
                     print(f"  [{CAMERA_ID}] ANALYSIS REQUEST trackId={req['trackId']} bytes={len(req['imageJpegB64'])}")
 
                 # Send position update to Kafka every frame
@@ -469,12 +498,7 @@ class InferenceWorker:
                         "timestamp": datetime.now().isoformat(),
                         "tracks": positions,
                     }
-                    self.producer.produce(
-                        TOPIC_DETECTIONS,
-                        key=CAMERA_ID,
-                        value=json.dumps(pos_event),
-                    )
-                    self.producer.poll(0)
+                    self._safe_produce(TOPIC_DETECTIONS, CAMERA_ID, json.dumps(pos_event))
 
                 # Periodic status log (every 5 seconds)
                 now = time.time()
@@ -488,6 +512,7 @@ class InferenceWorker:
                         f"| dropped={dropped_frames} "
                         f"| MediaMTX={'OK' if mediamtx_ok else 'FAIL'} "
                         f"| Kafka_sent={kafka_sent} "
+                        f"| Kafka_fail={self._produce_failures} "
                         f"| tracking={len(self._active_ids)} persons"
                     )
                     last_log_time = now

@@ -1,3 +1,9 @@
+/*
+ * Authors: Claire Liu, Yu-Jing Wei
+ * Description: React side panel showing live person counts, currently visible persons with
+ * VLM threat analysis, an activity timeline, event history with expandable details, and
+ * inline nickname editing.
+ */
 const CAMERAS = ["cam-01", "cam-02"];
 const PST_TIME_OPTS = {
   hour: "2-digit",

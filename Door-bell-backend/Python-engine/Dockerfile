@@ -1,3 +1,7 @@
+# Authors: Claire Liu, Yu-Jing Wei
+# Description: Dockerfile for the YOLO inference worker, installing ffmpeg/OpenCV deps
+# and the Python stack (ultralytics, torchreid, confluent-kafka) needed for detection,
+# tracking, and re-identification.
 ARG CUDA_BASE=python:3.11-slim
 FROM ${CUDA_BASE}
 

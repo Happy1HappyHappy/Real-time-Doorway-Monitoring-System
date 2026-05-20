@@ -1,3 +1,6 @@
+# Authors: Claire Liu, Yu-Jing Wei
+# Description: Multi-stage Dockerfile that builds the Spring Boot backend with Maven
+# and packages the resulting JAR into a slim JRE runtime image.
 FROM eclipse-temurin:17-jdk AS build
 WORKDIR /app
 COPY mvnw pom.xml ./

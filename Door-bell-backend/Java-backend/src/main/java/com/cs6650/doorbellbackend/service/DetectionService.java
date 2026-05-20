@@ -1,3 +1,9 @@
+/**
+ * Authors: Claire Liu, Yu-Jing Wei
+ * Description: Core detection service that performs re-identification via Qdrant, persists
+ * Person and DetectionRecord rows in PostgreSQL, caches track-to-person mappings per camera,
+ * and broadcasts detection/left/position events to WebSocket clients.
+ */
 package com.cs6650.doorbellbackend.service;
 
 import com.cs6650.doorbellbackend.dto.DetectionEvent;

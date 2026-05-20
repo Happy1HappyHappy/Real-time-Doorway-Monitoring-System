@@ -1,3 +1,8 @@
+/**
+ * Authors: Claire Liu, Yu-Jing Wei
+ * Description: Spring configuration that builds a RestClient pointed at the configured
+ * Qdrant vector database host and port.
+ */
 package com.cs6650.doorbellbackend.config;
 
 import org.springframework.beans.factory.annotation.Value;

@@ -1,6 +1,7 @@
 """
-ReID feature extractor using OSNet.
-Crops detected persons and extracts 512-dim L2-normalized embeddings.
+Authors: Claire Liu, Yu-Jing Wei
+Description: ReID feature extractor using OSNet. Crops detected persons from frames
+and extracts 512-dim L2-normalized appearance embeddings for re-identification.
 """
 
 import numpy as np

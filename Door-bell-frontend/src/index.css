@@ -1,3 +1,7 @@
+/*
+ * Authors: Claire Liu, Yu-Jing Wei
+ * Description: Global base styles resetting html/body/#root to full-viewport dark background.
+ */
 html, body {
   margin: 0;
   padding: 0;

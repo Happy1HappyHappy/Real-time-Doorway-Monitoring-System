@@ -1,3 +1,8 @@
+/**
+ * Authors: Claire Liu, Yu-Jing Wei
+ * Description: REST controller exposing endpoints to list all persons and update a person's
+ * nickname via PUT /api/persons/{personId}/nickname.
+ */
 package com.cs6650.doorbellbackend.controller;
 
 import com.cs6650.doorbellbackend.entity.Person;

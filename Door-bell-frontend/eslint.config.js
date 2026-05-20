@@ -1,3 +1,8 @@
+/*
+ * Authors: Claire Liu, Yu-Jing Wei
+ * Description: ESLint configuration for the Door-bell frontend, enabling React Hooks and
+ * React Refresh rules across all JS/JSX sources.
+ */
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'

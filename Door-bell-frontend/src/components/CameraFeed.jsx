@@ -1,3 +1,9 @@
+/*
+ * Authors: Claire Liu, Yu-Jing Wei
+ * Description: React component that establishes a WebRTC WHEP connection to MediaMTX to
+ * display the annotated camera stream, and overlays person ID/nickname labels on a canvas
+ * using live position events from the backend.
+ */
 import { useEffect, useRef, useState } from "react";
 
 function personColor(personId) {

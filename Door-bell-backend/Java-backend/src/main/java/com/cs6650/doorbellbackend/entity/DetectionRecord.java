@@ -1,3 +1,8 @@
+/**
+ * Authors: Claire Liu, Yu-Jing Wei
+ * Description: JPA entity for a single detection event, linking a Person to a camera, track ID,
+ * confidence, bounding box, and timestamp.
+ */
 package com.cs6650.doorbellbackend.entity;
 
 import jakarta.persistence.*;
