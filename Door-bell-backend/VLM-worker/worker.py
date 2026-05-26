@@ -47,6 +47,53 @@ PROMPT = (
 )
 
 
+# Threat-level override rules. Kept at module scope so unit tests can import them
+# and verify the rules independently of the VLM HTTP call.
+SAFE_ITEMS = ("pen", "pencil", "stylus", "marker")
+ALERT_KEYWORDS = ("knife", "gun", "pistol", "firearm", "bat", "crowbar", "weapon", "blade", "umbrella")
+WATCH_KEYWORDS = ("hat", "cap", "hood", "mask", "scarf", "sunglasses", "beanie", "helmet")
+
+
+def _contains_word(text: str, word: str) -> bool:
+    """Whole-word-ish match: avoids matching 'pencil' inside 'pencilcase' etc.
+    Uses space-padding instead of regex for speed and to mirror original logic."""
+    padded = f" {text} "
+    return f" {word} " in padded or f" {word}." in padded or f" {word}," in padded
+
+
+def apply_threat_overrides(level: str, description: str, reason: str) -> tuple:
+    """Pure function: apply rule-based threat-level overrides on top of VLM output.
+
+    Returns (level, reason). Extracted so we can unit-test the security rules
+    without mocking the VLM HTTP call.
+    """
+    if level not in ("safe", "watch", "alert"):
+        level = "safe"
+    desc_lower = description.lower()
+
+    # Hard DOWNGRADE: pen / pencil / stylus are ordinary items, force to safe.
+    if level == "alert":
+        for kw in SAFE_ITEMS:
+            if _contains_word(desc_lower, kw):
+                return "safe", f"auto-downgraded: '{kw}' is an ordinary item"
+
+    # Hard ESCALATE: genuine weapons + umbrella.
+    for kw in ALERT_KEYWORDS:
+        if _contains_word(desc_lower, kw):
+            if level != "alert":
+                reason = (reason + f" | auto-escalated: detected '{kw}' in description").strip(" |")
+            return "alert", reason
+
+    # Hard ESCALATE to at least watch: hat or mask.
+    if level == "safe":
+        for kw in WATCH_KEYWORDS:
+            if _contains_word(desc_lower, kw):
+                reason = (reason + f" | auto-escalated: detected '{kw}' in description").strip(" |")
+                return "watch", reason
+
+    return level, reason
+
+
 def call_ollama(image_b64: str) -> dict:
     """Call Ollama VLM; return parsed dict or error payload."""
     payload = {
@@ -70,39 +117,10 @@ def call_ollama(image_b64: str) -> dict:
         except json.JSONDecodeError:
             return {"error": f"invalid JSON from VLM: {raw[:200]}", "latencyMs": elapsed_ms}
         level = str(parsed.get("threat_level", "safe")).lower().strip()
-        if level not in ("safe", "watch", "alert"):
-            level = "safe"
         description = str(parsed.get("description", ""))[:300]
         reason = str(parsed.get("reason", ""))[:300]
 
-        desc_lower = description.lower()
-
-        # Hard DOWNGRADE: pen / pencil / stylus are ordinary items, force to safe.
-        SAFE_ITEMS = ("pen", "pencil", "stylus", "marker")
-        if level == "alert":
-            for kw in SAFE_ITEMS:
-                if f" {kw}" in f" {desc_lower} " or f"{kw} " in f" {desc_lower} ":
-                    level = "safe"
-                    reason = f"auto-downgraded: '{kw}' is an ordinary item"
-                    break
-
-        # Hard ESCALATE: genuine weapons + umbrella.
-        ALERT_KEYWORDS = ("knife", "gun", "pistol", "firearm", "bat", "crowbar", "weapon", "blade", "umbrella")
-        for kw in ALERT_KEYWORDS:
-            if f" {kw}" in f" {desc_lower} " or f"{kw} " in f" {desc_lower} ":
-                if level != "alert":
-                    reason = (reason + f" | auto-escalated: detected '{kw}' in description").strip(" |")
-                level = "alert"
-                break
-
-        # Hard ESCALATE to at least watch: hat or mask.
-        WATCH_KEYWORDS = ("hat", "cap", "hood", "mask", "scarf", "sunglasses", "beanie", "helmet")
-        if level == "safe":
-            for kw in WATCH_KEYWORDS:
-                if f" {kw}" in f" {desc_lower} " or f"{kw} " in f" {desc_lower} ":
-                    level = "watch"
-                    reason = (reason + f" | auto-escalated: detected '{kw}' in description").strip(" |")
-                    break
+        level, reason = apply_threat_overrides(level, description, reason)
 
         return {
             "description": description,
