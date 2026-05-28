@@ -71,18 +71,22 @@ def apply_threat_overrides(level: str, description: str, reason: str) -> tuple:
         level = "safe"
     desc_lower = description.lower()
 
-    # Hard DOWNGRADE: pen / pencil / stylus are ordinary items, force to safe.
-    if level == "alert":
-        for kw in SAFE_ITEMS:
-            if _contains_word(desc_lower, kw):
-                return "safe", f"auto-downgraded: '{kw}' is an ordinary item"
-
     # Hard ESCALATE: genuine weapons + umbrella.
+    # MUST run before the SAFE_ITEMS downgrade — otherwise "holding a knife and
+    # a pen" gets downgraded to safe because 'pen' is seen first, letting an armed
+    # person through whenever the VLM also mentions any ordinary object.
     for kw in ALERT_KEYWORDS:
         if _contains_word(desc_lower, kw):
             if level != "alert":
                 reason = (reason + f" | auto-escalated: detected '{kw}' in description").strip(" |")
             return "alert", reason
+
+    # Hard DOWNGRADE: pen / pencil / stylus are ordinary items, force to safe.
+    # Only reachable when no ALERT keyword matched above.
+    if level == "alert":
+        for kw in SAFE_ITEMS:
+            if _contains_word(desc_lower, kw):
+                return "safe", f"auto-downgraded: '{kw}' is an ordinary item"
 
     # Hard ESCALATE to at least watch: hat or mask.
     if level == "safe":
