@@ -43,7 +43,8 @@ docker compose logs -f <service>                 # follow logs
 ## GPU Deployment (AWS g4dn.xlarge)
 
 ```bash
-cp .env.gpu .env   # set AWS_PUBLIC_HOST and WEBRTC_ICE_HOST
+cp .env.gpu.example .env.gpu   # then fill in AWS_PUBLIC_HOST, WEBRTC_ICE_HOST, POSTGRES_PASSWORD
+cp .env.gpu .env
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
 ```
 
