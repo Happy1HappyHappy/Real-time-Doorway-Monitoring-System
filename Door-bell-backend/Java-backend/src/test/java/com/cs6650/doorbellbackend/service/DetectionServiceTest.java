@@ -1,7 +1,8 @@
 /**
  * Authors: Claire Liu, Yu-Jing Wei
  * Description: Unit tests for DetectionService covering Qdrant match/new-person branches,
- * the track→person cache used by position updates, and left-event cleanup.
+ * the track→person cache used by position updates, left-event cleanup, and the live-track
+ * state behind /api/live.
  */
 package com.cs6650.doorbellbackend.service;
 
@@ -19,6 +20,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -222,5 +224,52 @@ class DetectionServiceTest {
         detectionService.processPosition(evt);
 
         verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
+    }
+
+    private void seedLiveTrack(int trackId, long personId) {
+        when(qdrantService.searchSimilar(any())).thenReturn(Optional.empty());
+        Person saved = new Person(CAM, LocalDateTime.parse(TS));
+        saved.setId(personId);
+        when(personRepository.save(any(Person.class))).thenReturn(saved);
+        when(personRepository.getReferenceById(personId)).thenReturn(saved);
+        detectionService.processDetection(detectionEvent(detection(trackId, List.of(0.1))));
+    }
+
+    @Test
+    void liveTracks_followDetectionUntilLeft() {
+        seedLiveTrack(4, 77L);
+
+        assertThat(detectionService.personIdForTrack(CAM, 4)).contains(77L);
+        assertThat(detectionService.liveTracks()).singleElement().satisfies(t -> {
+            assertThat(t.cameraId()).isEqualTo(CAM);
+            assertThat(t.trackId()).isEqualTo(4);
+            assertThat(t.personId()).isEqualTo(77L);
+        });
+
+        DetectionEvent leftEvt = new DetectionEvent();
+        leftEvt.setType("left");
+        leftEvt.setCameraId(CAM);
+        leftEvt.setLeftTrackIds(List.of(4));
+        detectionService.processLeft(leftEvt);
+
+        assertThat(detectionService.liveTracks()).isEmpty();
+        assertThat(detectionService.personIdForTrack(CAM, 4)).isEmpty();
+    }
+
+    @Test
+    void liveTracks_dropTracksThatStopUpdating() {
+        seedLiveTrack(6, 88L);
+
+        // A negative idle window puts the cutoff in the future, so every track counts as stale.
+        assertThat(detectionService.liveTracks(Duration.ofSeconds(-1))).isEmpty();
+        assertThat(detectionService.liveTracks()).isEmpty();
+        assertThat(detectionService.personIdForTrack(CAM, 6)).isEmpty();
+    }
+
+    @Test
+    void personIdForTrack_unknownCameraOrTrack_isEmpty() {
+        assertThat(detectionService.personIdForTrack("cam-99", 1)).isEmpty();
+        seedLiveTrack(2, 5L);
+        assertThat(detectionService.personIdForTrack(CAM, 3)).isEmpty();
     }
 }

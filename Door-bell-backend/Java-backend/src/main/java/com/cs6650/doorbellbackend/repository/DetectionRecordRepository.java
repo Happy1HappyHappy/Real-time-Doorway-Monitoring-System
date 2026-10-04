@@ -7,5 +7,10 @@ package com.cs6650.doorbellbackend.repository;
 import com.cs6650.doorbellbackend.entity.DetectionRecord;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 public interface DetectionRecordRepository extends JpaRepository<DetectionRecord, Long> {
+
+    List<DetectionRecord> findByDetectedAtBetweenOrderByDetectedAtDesc(LocalDateTime from, LocalDateTime to);
 }

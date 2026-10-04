@@ -2,7 +2,8 @@
  * Authors: Claire Liu, Yu-Jing Wei
  * Description: Core detection service that performs re-identification via Qdrant, persists
  * Person and DetectionRecord rows in PostgreSQL, caches track-to-person mappings per camera,
- * and broadcasts detection/left/position events to WebSocket clients.
+ * keeps track of who is currently in frame (served by /api/live), and broadcasts
+ * detection/left/position events to WebSocket clients.
  */
 package com.cs6650.doorbellbackend.service;
 
@@ -16,8 +17,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,10 +41,58 @@ public class DetectionService {
     // trackId → personId cache per camera
     private final ConcurrentHashMap<String, Map<Integer, Long>> trackPersonCache = new ConcurrentHashMap<>();
 
+    // "cameraId:trackId" → identified person currently in frame, refreshed by position events
+    private final ConcurrentHashMap<String, LiveTrack> liveTracks = new ConcurrentHashMap<>();
+
+    // A track with no position update for this long counts as gone, e.g. its worker restarted
+    // without sending "left" and the new process is reusing track IDs from 1.
+    static final Duration LIVE_MAX_IDLE = Duration.ofSeconds(10);
+
+    /** Times are naive UTC, the same clock the Python workers stamp events with. */
+    public record LiveTrack(String cameraId, int trackId, long personId,
+                            LocalDateTime firstSeenAt, LocalDateTime lastSeenAt) {
+        LiveTrack seenAt(LocalDateTime when) {
+            return new LiveTrack(cameraId, trackId, personId, firstSeenAt, when);
+        }
+    }
+
+    private static String trackKey(String cameraId, int trackId) {
+        return cameraId + ":" + trackId;
+    }
+
+    private static LocalDateTime nowUtc() {
+        return LocalDateTime.now(ZoneOffset.UTC);
+    }
+
+    /** The person ReID matched to this track, while the track is still in frame. */
+    public Optional<Long> personIdForTrack(String cameraId, int trackId) {
+        LiveTrack live = liveTracks.get(trackKey(cameraId, trackId));
+        if (live == null || live.lastSeenAt().isBefore(nowUtc().minus(LIVE_MAX_IDLE))) {
+            return Optional.empty();
+        }
+        return Optional.of(live.personId());
+    }
+
+    /** Identified people currently in frame, ordered by camera and then arrival. */
+    public List<LiveTrack> liveTracks() {
+        return liveTracks(LIVE_MAX_IDLE);
+    }
+
+    List<LiveTrack> liveTracks(Duration maxIdle) {
+        LocalDateTime cutoff = nowUtc().minus(maxIdle);
+        liveTracks.values().removeIf(t -> t.lastSeenAt().isBefore(cutoff));
+        return liveTracks.values().stream()
+                .sorted(Comparator.comparing(LiveTrack::cameraId).thenComparing(LiveTrack::firstSeenAt))
+                .toList();
+    }
+
     public void processLeft(DetectionEvent event) {
         Map<Integer, Long> cache = trackPersonCache.get(event.getCameraId());
         if (cache != null && event.getLeftTrackIds() != null) {
             event.getLeftTrackIds().forEach(cache::remove);
+        }
+        if (event.getLeftTrackIds() != null) {
+            event.getLeftTrackIds().forEach(id -> liveTracks.remove(trackKey(event.getCameraId(), id)));
         }
         Map<String, Object> wsPayload = Map.of(
                 "type", "left",
@@ -126,6 +178,9 @@ public class DetectionService {
             // Cache trackId → personId for position updates
             trackPersonCache.computeIfAbsent(cameraId, k -> new ConcurrentHashMap<>())
                     .put(detection.getTrackId(), personId);
+            LocalDateTime now = nowUtc();
+            liveTracks.put(trackKey(cameraId, detection.getTrackId()),
+                    new LiveTrack(cameraId, detection.getTrackId(), personId, now, now));
 
             // Push to WebSocket
             long totalMs = System.currentTimeMillis() - pipelineStart;
@@ -149,10 +204,12 @@ public class DetectionService {
         Map<Integer, Long> cache = trackPersonCache.getOrDefault(cameraId, Map.of());
         if (cache.isEmpty() || event.getTracks() == null) return;
 
+        LocalDateTime now = nowUtc();
         List<Map<String, Object>> tracks = new ArrayList<>();
         for (DetectionEvent.TrackPosition t : event.getTracks()) {
             Long personId = cache.get(t.getTrackId());
             if (personId == null) continue;
+            liveTracks.computeIfPresent(trackKey(cameraId, t.getTrackId()), (key, live) -> live.seenAt(now));
             Map<String, Object> entry = new HashMap<>();
             entry.put("personId", personId);
             entry.put("bbox", t.getBbox());
