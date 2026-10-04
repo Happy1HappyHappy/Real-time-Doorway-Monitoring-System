@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "door-bell": {
+      "command": "${CLAUDE_PROJECT_DIR:-.}/Door-bell-mcp/.venv/bin/python",
+      "args": ["${CLAUDE_PROJECT_DIR:-.}/Door-bell-mcp/server.py"],
+      "env": {
+        "DOORBELL_API_URL": "${DOORBELL_API_URL:-http://localhost:8080}",
+        "DOORBELL_API_USER": "${DOORBELL_API_USER:-}",
+        "DOORBELL_API_PASSWORD": "${DOORBELL_API_PASSWORD:-}",
+        "DOORBELL_RTSP_URL": "${DOORBELL_RTSP_URL:-rtsp://localhost:8554}",
+        "DOORBELL_CAMERAS": "${DOORBELL_CAMERAS:-cam-01,cam-02}"
+      }
+    }
+  }
+}

@@ -14,7 +14,7 @@ When a new track appears, the worker crops that person from their first 5 usable
 
 The Java backend looks the embedding up in Qdrant. If the best match has cosine similarity ≥ 0.75, it's someone we've seen before and their `last_seen_at` is updated. Otherwise a new person is created in PostgreSQL and the vector is stored. Results go to the browser over STOMP/WebSocket. You can give anyone a nickname from the dashboard, and the nickname stays with that ID.
 
-Separately, the worker sends a JPEG crop of each person to `doorbell-analysis-requests`, and sends a new one every 5 s while they stay in frame. `vlm-worker` passes the crop to Ollama (`qwen2.5vl:3b` by default) and asks for a one-line description and a threat level of `safe`, `watch`, or `alert`. A 3B model gets this wrong often enough that its answer is run through a few hard rules in `apply_threat_overrides`. A visible weapon is always `alert`, a hat or mask is at least `watch`, and a pen on its own can't trigger an `alert`.
+Separately, the worker sends a JPEG crop of each person to `doorbell-analysis-requests`, and sends a new one every 5 s while they stay in frame. `vlm-worker` passes the crop to Ollama (`qwen2.5vl:3b` by default) and asks for a one-line description and a threat level of `safe`, `watch`, or `alert`. A 3B model gets this wrong often enough that its answer is run through a few hard rules in `apply_threat_overrides`. A visible weapon is always `alert`, a hat or mask is at least `watch`, and a pen on its own can't trigger an `alert`. Verdicts go to the dashboard and are also saved in PostgreSQL (`analysis_records`).
 
 If the backend can't parse a message, it goes straight to `doorbell-dlq` so one bad payload doesn't stall the consumer. Processing failures, such as Postgres being down, are retried 3 times at 2 s intervals before they're dead-lettered.
 
@@ -95,6 +95,39 @@ These are the settings you're most likely to change. The defaults below are the 
 | `OLLAMA_MODEL` | `.env` | `qwen2.5vl:3b` | Any Ollama vision model that can return JSON |
 | `qdrant.similarity-threshold` | `application.properties` | `0.75` | Cosine score needed to count as the same person |
 
+## Asking Claude about the door (MCP)
+
+`Door-bell-mcp/` is an [MCP](https://modelcontextprotocol.io) server. It gives an AI assistant read access to the system and lets it name people. Hook it up to Claude Code, Claude Desktop, Cursor or any other MCP client and you can ask things like "who came by this morning?", "did anything get flagged while I was out?" or "who's at the door right now?". The assistant can also pull a live frame and look for itself.
+
+| Tool | What it does |
+|---|---|
+| `get_live_status` | Who's in frame right now, with their latest VLM verdict |
+| `get_snapshot` | Current frame from a camera as a JPEG, annotated or raw |
+| `list_people` | Everyone identified so far, with nicknames and first/last seen |
+| `get_visits` | Arrivals in a time window, filtered by camera or person |
+| `get_threat_events` | VLM verdicts in a time window, grouped so a two-minute visit isn't 25 rows |
+| `set_nickname` | Name a person, same as editing it on the dashboard |
+
+There's also a `door_report` prompt, which Claude Code lists as `/mcp__door-bell__door_report`.
+
+The server only talks to the backend's REST API (`/api/live`, `/api/detections`, `/api/analyses`, `/api/persons`) and grabs frames from MediaMTX with your local `ffmpeg`. It never connects to Postgres or Qdrant.
+
+One-time setup (Python 3.10+):
+
+```bash
+python3 -m venv Door-bell-mcp/.venv
+Door-bell-mcp/.venv/bin/pip install -r Door-bell-mcp/requirements.txt
+```
+
+`.mcp.json` registers the server with Claude Code. Start `claude` from the repo root, approve `door-bell` when it asks, and run `/mcp` to check that it's connected. By default it talks to a local stack at `http://localhost:8080` and `rtsp://localhost:8554`. To point it at the EC2 deployment instead, export these before starting Claude Code:
+
+```bash
+export DOORBELL_API_URL=http://<ec2-host> DOORBELL_RTSP_URL=rtsp://<ec2-host>:8554
+export DOORBELL_API_USER=<nginx user> DOORBELL_API_PASSWORD=<nginx password>
+```
+
+Because the API calls go through nginx on port 80, port 8080 can stay closed. Every setting is listed at the top of `server.py`. For Claude Desktop, put the same command, args and env in `claude_desktop_config.json`, using absolute paths.
+
 ## GPU deployment (AWS g4dn.xlarge)
 
 `docker-compose.gpu.yml` switches the YOLO workers to a CUDA base image and runs Ollama in a container on the same GPU.
@@ -143,9 +176,10 @@ docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi
 cd Door-bell-backend/Python-engine && pytest    # torch, YOLO and Kafka are stubbed; only needs numpy + opencv
 cd Door-bell-backend/VLM-worker && pytest       # threat-level override rules
 cd Door-bell-backend/Java-backend && ./mvnw test
+cd Door-bell-mcp && .venv/bin/python -m pytest   # needs pytest in the venv; snapshot tests use ffmpeg
 ```
 
-`DoorBellBackendApplicationTests` starts the full Spring context, so it needs Postgres, Kafka and Qdrant running. To run only the unit tests, use `./mvnw test -Dtest='DetectionServiceTest,PersonControllerTest'`.
+`DoorBellBackendApplicationTests` starts the full Spring context, so it needs Postgres, Kafka and Qdrant running. To run only the unit tests, use `./mvnw test -Dtest='!DoorBellBackendApplicationTests'`.
 
 ## Repository layout
 
@@ -155,17 +189,20 @@ Door-bell-backend/
   VLM-worker/        Ollama client and threat-level rules (worker.py)
   Java-backend/      Spring Boot: Kafka consumers, Qdrant + Postgres, WebSocket, REST
 Door-bell-frontend/  React dashboard and the nginx config that proxies /ws, /api and WHEP
+Door-bell-mcp/       MCP server for Claude Code and other AI assistants (server.py)
 docker-compose.yml        full stack, CPU
 docker-compose.gpu.yml    GPU override, adds an Ollama container
+.mcp.json                 registers Door-bell-mcp with Claude Code
 ```
 
 ## Known limitations
 
-- ReID only runs on crops that are at least 80×200 px. Someone who never gets close to the camera gets a new ID on every visit.
+- ReID only runs on crops that are at least 80×200 px. Someone who never gets that close to the camera is never recorded as a person, although the VLM still sees them.
 - Matching is one nearest-neighbour lookup against a fixed threshold, and the stored embedding is never updated after the first sighting. People in similar clothes can get merged, and a big lighting change can split one person into two.
 - The threat rules are deliberately jumpy. An umbrella counts as a weapon on purpose. This is a demo, not a security product.
 - The camera list is hard-coded in two places, `docker-compose.yml` and `App.jsx`.
 - Kafka runs as a single broker with replication factor 1.
+- Nothing prunes `analysis_records` yet. At one verdict per person every 5 s, it grows steadily on a busy door.
 
 ## Authors
 
